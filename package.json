@@ -1,0 +1,16 @@
+{
+  "name": "relayq",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A durable distributed job queue built with Node.js and SQLite.",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/server.ts",
+    "worker": "node src/worker.ts",
+    "test": "node --test",
+    "check": "node --run test"
+  }
+}
