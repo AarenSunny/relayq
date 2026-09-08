@@ -23,6 +23,8 @@ protocol, and HTTP control plane are implemented in this repository.
 - HTTP endpoints for producers, workers, inspection, and queue statistics
 - Example worker with `sum`, `uppercase`, and `sleep` task handlers
 - Unit and end-to-end HTTP tests with no third-party runtime dependencies
+- Non-root container image and scalable multi-worker Compose demo
+- Reproducible durability benchmark and deterministic crash demonstration
 
 ## Quick start
 
@@ -41,6 +43,12 @@ npm run worker
 
 Open `http://localhost:8080` to watch queue counts, jobs, and lifecycle events
 update live. The dashboard can also enqueue work for the example worker.
+
+Or launch a persistent API with three workers in containers:
+
+```bash
+docker compose up --build --scale worker=3
+```
 
 Submit a job:
 
@@ -80,7 +88,9 @@ The default database is `relayq.db`. Set `RELAYQ_DB`, `PORT`, `RELAYQ_URL`,
 | `GET` | `/health` | Liveness check |
 
 See [the architecture notes](docs/ARCHITECTURE.md) for the delivery guarantees,
-concurrency strategy, tradeoffs, and trust boundaries.
+concurrency strategy, tradeoffs, and trust boundaries. The
+[operations guide](docs/OPERATIONS.md) covers containers, benchmarking, and a
+reproducible worker-crash demonstration.
 
 ## Roadmap
 
@@ -89,13 +99,14 @@ concurrency strategy, tradeoffs, and trust boundaries.
 - Dashboard filtering and per-job timeline views
 - PostgreSQL storage adapter and multi-node control plane
 - Worker authentication, rate limiting, and structured audit events
-- Docker Compose demo and load/failure benchmark
+- Multi-host benchmark and automated chaos scenarios
 
 ## Status
 
 The durable queue MVP now includes renewable leases, failed-job recovery,
-transactional event history, and a live control-room dashboard. The next
-milestone is production packaging and load/failure benchmarking.
+transactional event history, a live control-room dashboard, container packaging,
+and repeatable performance and failure demonstrations. The next milestone is an
+exponential retry policy and stronger API hardening.
 
 ## License
 

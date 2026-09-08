@@ -1,7 +1,7 @@
 import { setTimeout as delay } from "node:timers/promises";
 
 const baseUrl = process.env.RELAYQ_URL ?? "http://localhost:8080";
-const workerId = process.env.WORKER_ID ?? `worker-${process.pid}`;
+const workerId = process.env.WORKER_ID ?? `worker-${process.env.HOSTNAME ?? process.pid}`;
 const pollMs = Number(process.env.POLL_MS ?? 500);
 const leaseMs = Number(process.env.LEASE_MS ?? 30_000);
 

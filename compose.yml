@@ -1,0 +1,23 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - relayq-data:/data
+    restart: unless-stopped
+
+  worker:
+    build: .
+    command: ["node", "src/worker.ts"]
+    environment:
+      RELAYQ_URL: http://api:8080
+      POLL_MS: "250"
+      LEASE_MS: "30000"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  relayq-data:

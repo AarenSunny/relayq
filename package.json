@@ -10,6 +10,8 @@
   "scripts": {
     "start": "node src/server.ts",
     "worker": "node src/worker.ts",
+    "benchmark": "node tools/benchmark.ts",
+    "failure-demo": "node tools/failure-demo.ts",
     "test": "node --test",
     "check": "node --run test"
   }

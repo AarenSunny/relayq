@@ -1,0 +1,10 @@
+.git
+.github
+node_modules
+test
+tools
+docs
+*.db
+*.db-shm
+*.db-wal
+.DS_Store
