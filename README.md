@@ -15,7 +15,9 @@ protocol, and HTTP control plane are implemented in this repository.
 - Delayed jobs and configurable attempt budgets
 - Atomic worker leases that prevent double claims
 - Automatic recovery after worker crashes
+- Renewable leases for handlers that outlive their initial claim
 - Explicit success, failure, cancellation, and retry transitions
+- Dead-letter inspection and operator-controlled redrive
 - HTTP endpoints for producers, workers, inspection, and queue statistics
 - Example worker with `sum`, `uppercase`, and `sleep` task handlers
 - Unit and end-to-end HTTP tests with no third-party runtime dependencies
@@ -51,7 +53,7 @@ curl -s http://localhost:8080/stats
 ```
 
 The default database is `relayq.db`. Set `RELAYQ_DB`, `PORT`, `RELAYQ_URL`,
-`WORKER_ID`, or `POLL_MS` to change runtime settings.
+`WORKER_ID`, `POLL_MS`, or `LEASE_MS` to change runtime settings.
 
 ## API
 
@@ -64,6 +66,9 @@ The default database is `relayq.db`. Set `RELAYQ_DB`, `PORT`, `RELAYQ_URL`,
 | `POST` | `/workers/:workerId/claim` | Lease the next eligible job |
 | `POST` | `/jobs/:id/complete` | Record a leased job's result |
 | `POST` | `/jobs/:id/fail` | Retry or permanently fail a job |
+| `POST` | `/jobs/:id/heartbeat` | Renew a worker-owned lease |
+| `GET` | `/dead-letter` | Inspect jobs that exhausted retries |
+| `POST` | `/jobs/:id/requeue` | Redrive a failed job with fresh attempts |
 | `GET` | `/stats` | Return counts by state |
 | `GET` | `/health` | Liveness check |
 
@@ -72,8 +77,8 @@ concurrency strategy, tradeoffs, and trust boundaries.
 
 ## Roadmap
 
-- Lease heartbeats for long-running jobs
-- Exponential backoff and dead-letter queues
+- Exponential backoff with configurable jitter
+- Bulk dead-letter redrive and retention policies
 - Server-sent events dashboard
 - PostgreSQL storage adapter and multi-node control plane
 - Worker authentication, rate limiting, and structured audit events
@@ -81,8 +86,9 @@ concurrency strategy, tradeoffs, and trust boundaries.
 
 ## Status
 
-The durable queue MVP and worker protocol are operational. The next milestone is
-lease renewal plus dead-letter handling, followed by an observable web dashboard.
+The durable queue MVP, renewable worker leases, and dead-letter recovery are
+operational. The next milestone is structured event history plus an observable
+web dashboard.
 
 ## License
 

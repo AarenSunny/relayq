@@ -126,6 +126,19 @@ export class JobStore {
     return this.get(id)!;
   }
 
+  renewLease(id: string, workerId: string, leaseMs = 30_000): Job {
+    if (!workerId?.trim()) throw new Error("workerId is required");
+    if (!Number.isFinite(leaseMs) || leaseMs < 1_000) throw new Error("leaseMs must be at least 1000");
+    const now = this.clock();
+    const change = this.db.prepare(`
+      UPDATE jobs
+      SET lease_expires_at = ?, updated_at = ?
+      WHERE id = ? AND status = 'running' AND worker_id = ? AND lease_expires_at > ?
+    `).run(now + leaseMs, now, id, workerId.trim(), now);
+    if (change.changes !== 1) throw new Error("job lease is missing, expired, or owned by another worker");
+    return this.get(id)!;
+  }
+
   fail(id: string, workerId: string, error: string, retryDelayMs = 0): Job {
     if (!error?.trim()) throw new Error("error is required");
     if (!Number.isFinite(retryDelayMs) || retryDelayMs < 0) {
@@ -157,6 +170,21 @@ export class JobStore {
       SET status = 'cancelled', worker_id = NULL, lease_expires_at = NULL, updated_at = ?
       WHERE id = ?
     `).run(now, id);
+    return this.get(id)!;
+  }
+
+  requeueFailed(id: string, delayMs = 0): Job {
+    if (!Number.isFinite(delayMs) || delayMs < 0) throw new Error("delayMs must be non-negative");
+    const job = this.get(id);
+    if (!job) throw new Error("job not found");
+    if (job.status !== "failed") throw new Error("only failed jobs can be requeued");
+    const now = this.clock();
+    this.db.prepare(`
+      UPDATE jobs
+      SET status = 'queued', attempts = 0, available_at = ?, worker_id = NULL,
+          lease_expires_at = NULL, result = NULL, error = NULL, updated_at = ?
+      WHERE id = ?
+    `).run(now + delayMs, now, id);
     return this.get(id)!;
   }
 

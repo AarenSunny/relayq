@@ -57,6 +57,10 @@ export function createRelayServer(store: JobStore): Server {
         const limit = Number(url.searchParams.get("limit") ?? 100);
         return json(response, 200, { jobs: store.list(rawStatus as JobStatus | undefined, limit) });
       }
+      if (method === "GET" && url.pathname === "/dead-letter") {
+        const limit = Number(url.searchParams.get("limit") ?? 100);
+        return json(response, 200, { jobs: store.list("failed", limit) });
+      }
 
       const jobMatch = url.pathname.match(/^\/jobs\/([^/]+)$/);
       if (method === "GET" && jobMatch) {
@@ -67,6 +71,13 @@ export function createRelayServer(store: JobStore): Server {
       const cancelMatch = url.pathname.match(/^\/jobs\/([^/]+)\/cancel$/);
       if (method === "POST" && cancelMatch) {
         return json(response, 200, store.cancel(cancelMatch[1]));
+      }
+
+      const requeueMatch = url.pathname.match(/^\/jobs\/([^/]+)\/requeue$/);
+      if (method === "POST" && requeueMatch) {
+        const body = await readJson(request);
+        const delayMs = body.delayMs === undefined ? 0 : Number(body.delayMs);
+        return json(response, 200, store.requeueFailed(requeueMatch[1], delayMs));
       }
 
       const claimMatch = url.pathname.match(/^\/workers\/([^/]+)\/claim$/);
@@ -81,6 +92,15 @@ export function createRelayServer(store: JobStore): Server {
       if (method === "POST" && completeMatch) {
         const body = await readJson(request);
         return json(response, 200, store.complete(completeMatch[1], String(body.workerId ?? ""), body.result));
+      }
+
+      const heartbeatMatch = url.pathname.match(/^\/jobs\/([^/]+)\/heartbeat$/);
+      if (method === "POST" && heartbeatMatch) {
+        const body = await readJson(request);
+        const leaseMs = body.leaseMs === undefined ? 30_000 : Number(body.leaseMs);
+        return json(response, 200, store.renewLease(
+          heartbeatMatch[1], String(body.workerId ?? ""), leaseMs,
+        ));
       }
 
       const failMatch = url.pathname.match(/^\/jobs\/([^/]+)\/fail$/);

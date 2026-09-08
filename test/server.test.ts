@@ -66,3 +66,40 @@ test("invalid jobs return a useful client error", async () => {
   assert.equal(response.status, 409);
   assert.match((await response.json() as { error: string }).error, /type is required/);
 });
+
+test("workers renew leases and operators recover dead-lettered jobs", async () => {
+  const created = await fetch(`${baseUrl}/jobs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "flaky", maxAttempts: 1 }),
+  }).then((response) => response.json()) as { id: string };
+
+  await fetch(`${baseUrl}/workers/recovery-worker/claim`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ leaseMs: 5_000 }),
+  });
+  const renewed = await fetch(`${baseUrl}/jobs/${created.id}/heartbeat`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ workerId: "recovery-worker", leaseMs: 10_000 }),
+  }).then((response) => response.json()) as { leaseExpiresAt: number };
+  assert.ok(renewed.leaseExpiresAt > Date.now());
+
+  await fetch(`${baseUrl}/jobs/${created.id}/fail`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ workerId: "recovery-worker", error: "planned test failure" }),
+  });
+  const deadLetter = await fetch(`${baseUrl}/dead-letter`).then((response) => response.json()) as
+    { jobs: Array<{ id: string }> };
+  assert.ok(deadLetter.jobs.some((job) => job.id === created.id));
+
+  const requeued = await fetch(`${baseUrl}/jobs/${created.id}/requeue`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ delayMs: 100 }),
+  }).then((response) => response.json()) as { status: string; attempts: number };
+  assert.equal(requeued.status, "queued");
+  assert.equal(requeued.attempts, 0);
+});

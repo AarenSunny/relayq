@@ -3,6 +3,7 @@ import { setTimeout as delay } from "node:timers/promises";
 const baseUrl = process.env.RELAYQ_URL ?? "http://localhost:8080";
 const workerId = process.env.WORKER_ID ?? `worker-${process.pid}`;
 const pollMs = Number(process.env.POLL_MS ?? 500);
+const leaseMs = Number(process.env.LEASE_MS ?? 30_000);
 
 const handlers: Record<string, (payload: unknown) => Promise<unknown>> = {
   sum: async (payload) => {
@@ -34,7 +35,7 @@ async function run(): Promise<void> {
   while (true) {
     try {
       const response = await request(`/workers/${encodeURIComponent(workerId)}/claim`, {
-        method: "POST", body: JSON.stringify({ leaseMs: 30_000 }),
+        method: "POST", body: JSON.stringify({ leaseMs }),
       });
       if (response.status === 204) {
         await delay(pollMs);
@@ -43,6 +44,17 @@ async function run(): Promise<void> {
       if (!response.ok) throw new Error(`claim failed with ${response.status}`);
       const job = await response.json() as { id: string; type: string; payload: unknown };
       const handler = handlers[job.type];
+      const heartbeat = setInterval(async () => {
+        try {
+          const renewal = await request(`/jobs/${job.id}/heartbeat`, {
+            method: "POST", body: JSON.stringify({ workerId, leaseMs }),
+          });
+          if (!renewal.ok) console.error(`lease renewal for ${job.id} returned ${renewal.status}`);
+        } catch (error) {
+          console.error(`lease renewal for ${job.id} failed: ${error}`);
+        }
+      }, Math.max(1_000, Math.floor(leaseMs / 3)));
+      heartbeat.unref();
       try {
         if (!handler) throw new Error(`unknown job type: ${job.type}`);
         const result = await handler(job.payload);
@@ -57,6 +69,8 @@ async function run(): Promise<void> {
           body: JSON.stringify({ workerId, error: message, retryDelayMs: 1_000 }),
         });
         console.error(`failed ${job.id}: ${message}`);
+      } finally {
+        clearInterval(heartbeat);
       }
     } catch (error) {
       console.error(error instanceof Error ? error.message : error);
