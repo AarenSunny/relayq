@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type { Job, JobStatus, NewJob, QueueStats } from "./types.ts";
+import type { Job, JobEvent, JobEventType, JobStatus, NewJob, QueueStats } from "./types.ts";
 
 type Clock = () => number;
 type JobRow = Record<string, unknown>;
@@ -35,6 +35,17 @@ export class JobStore {
       CREATE INDEX IF NOT EXISTS jobs_queue_order
         ON jobs(status, available_at, priority DESC, created_at ASC);
       CREATE INDEX IF NOT EXISTS jobs_worker ON jobs(worker_id, status);
+      CREATE TABLE IF NOT EXISTS job_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_id TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+        event_type TEXT NOT NULL,
+        from_status TEXT,
+        to_status TEXT NOT NULL,
+        worker_id TEXT,
+        detail TEXT NOT NULL DEFAULT '{}',
+        created_at INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS job_events_job_id ON job_events(job_id, id);
     `);
   }
 
@@ -55,13 +66,16 @@ export class JobStore {
 
     const now = this.clock();
     const id = randomUUID();
-    this.db.prepare(`
-      INSERT INTO jobs (
-        id, type, payload, status, priority, max_attempts, attempts,
-        available_at, created_at, updated_at
-      ) VALUES (?, ?, ?, 'queued', ?, ?, 0, ?, ?, ?)
-    `).run(id, input.type.trim(), JSON.stringify(input.payload ?? null), priority,
-      maxAttempts, now + delayMs, now, now);
+    this.transaction(() => {
+      this.db.prepare(`
+        INSERT INTO jobs (
+          id, type, payload, status, priority, max_attempts, attempts,
+          available_at, created_at, updated_at
+        ) VALUES (?, ?, ?, 'queued', ?, ?, 0, ?, ?, ?)
+      `).run(id, input.type.trim(), JSON.stringify(input.payload ?? null), priority,
+        maxAttempts, now + delayMs, now, now);
+      this.recordEvent(id, "enqueued", null, "queued", null, { priority, delayMs, maxAttempts }, now);
+    });
     return this.get(id)!;
   }
 
@@ -78,6 +92,36 @@ export class JobStore {
       ? this.db.prepare("SELECT * FROM jobs WHERE status = ? ORDER BY created_at DESC LIMIT ?").all(status, limit)
       : this.db.prepare("SELECT * FROM jobs ORDER BY created_at DESC LIMIT ?").all(limit);
     return (rows as JobRow[]).map((row) => this.toJob(row));
+  }
+
+  listEvents(jobId?: string, afterId = 0, limit = 100): JobEvent[] {
+    if (!Number.isInteger(afterId) || afterId < 0) throw new Error("afterId must be non-negative");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
+      throw new Error("limit must be between 1 and 1000");
+    }
+    let rows: JobRow[];
+    if (jobId && afterId > 0) {
+      rows = this.db.prepare(`
+        SELECT * FROM job_events WHERE job_id = ? AND id > ? ORDER BY id ASC LIMIT ?
+      `).all(jobId, afterId, limit) as JobRow[];
+    } else if (jobId) {
+      rows = this.db.prepare(`
+        SELECT * FROM (
+          SELECT * FROM job_events WHERE job_id = ? ORDER BY id DESC LIMIT ?
+        ) ORDER BY id ASC
+      `).all(jobId, limit) as JobRow[];
+    } else if (afterId > 0) {
+      rows = this.db.prepare(`
+        SELECT * FROM job_events WHERE id > ? ORDER BY id ASC LIMIT ?
+      `).all(afterId, limit) as JobRow[];
+    } else {
+      rows = this.db.prepare(`
+        SELECT * FROM (
+          SELECT * FROM job_events ORDER BY id DESC LIMIT ?
+        ) ORDER BY id ASC
+      `).all(limit) as JobRow[];
+    }
+    return rows.map((row) => this.toEvent(row));
   }
 
   claim(workerId: string, leaseMs = 30_000): Job | null {
@@ -106,6 +150,7 @@ export class JobStore {
             attempts = attempts + 1, updated_at = ?
         WHERE id = ? AND status = 'queued'
       `).run(workerId.trim(), now + leaseMs, now, candidate.id);
+      this.recordEvent(candidate.id, "claimed", "queued", "running", workerId.trim(), { leaseMs }, now);
       this.db.exec("COMMIT");
       return this.get(candidate.id);
     } catch (error) {
@@ -116,27 +161,33 @@ export class JobStore {
 
   complete(id: string, workerId: string, result: unknown = null): Job {
     const now = this.clock();
-    const change = this.db.prepare(`
-      UPDATE jobs
-      SET status = 'succeeded', result = ?, error = NULL, worker_id = NULL,
-          lease_expires_at = NULL, updated_at = ?
-      WHERE id = ? AND status = 'running' AND worker_id = ?
-    `).run(JSON.stringify(result), now, id, workerId);
-    if (change.changes !== 1) throw new Error("job is not running for this worker");
-    return this.get(id)!;
+    return this.transaction(() => {
+      const change = this.db.prepare(`
+        UPDATE jobs
+        SET status = 'succeeded', result = ?, error = NULL, worker_id = NULL,
+            lease_expires_at = NULL, updated_at = ?
+        WHERE id = ? AND status = 'running' AND worker_id = ?
+      `).run(JSON.stringify(result), now, id, workerId);
+      if (change.changes !== 1) throw new Error("job is not running for this worker");
+      this.recordEvent(id, "completed", "running", "succeeded", workerId, {}, now);
+      return this.get(id)!;
+    });
   }
 
   renewLease(id: string, workerId: string, leaseMs = 30_000): Job {
     if (!workerId?.trim()) throw new Error("workerId is required");
     if (!Number.isFinite(leaseMs) || leaseMs < 1_000) throw new Error("leaseMs must be at least 1000");
     const now = this.clock();
-    const change = this.db.prepare(`
-      UPDATE jobs
-      SET lease_expires_at = ?, updated_at = ?
-      WHERE id = ? AND status = 'running' AND worker_id = ? AND lease_expires_at > ?
-    `).run(now + leaseMs, now, id, workerId.trim(), now);
-    if (change.changes !== 1) throw new Error("job lease is missing, expired, or owned by another worker");
-    return this.get(id)!;
+    return this.transaction(() => {
+      const change = this.db.prepare(`
+        UPDATE jobs
+        SET lease_expires_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'running' AND worker_id = ? AND lease_expires_at > ?
+      `).run(now + leaseMs, now, id, workerId.trim(), now);
+      if (change.changes !== 1) throw new Error("job lease is missing, expired, or owned by another worker");
+      this.recordEvent(id, "lease_renewed", "running", "running", workerId.trim(), { leaseMs }, now);
+      return this.get(id)!;
+    });
   }
 
   fail(id: string, workerId: string, error: string, retryDelayMs = 0): Job {
@@ -151,13 +202,18 @@ export class JobStore {
 
     const now = this.clock();
     const exhausted = job.attempts >= job.maxAttempts;
-    this.db.prepare(`
-      UPDATE jobs
-      SET status = ?, error = ?, worker_id = NULL, lease_expires_at = NULL,
-          available_at = ?, updated_at = ?
-      WHERE id = ?
-    `).run(exhausted ? "failed" : "queued", error.trim(), now + retryDelayMs, now, id);
-    return this.get(id)!;
+    return this.transaction(() => {
+      const toStatus = exhausted ? "failed" : "queued";
+      this.db.prepare(`
+        UPDATE jobs
+        SET status = ?, error = ?, worker_id = NULL, lease_expires_at = NULL,
+            available_at = ?, updated_at = ?
+        WHERE id = ?
+      `).run(toStatus, error.trim(), now + retryDelayMs, now, id);
+      this.recordEvent(id, exhausted ? "dead_lettered" : "retry_scheduled", "running", toStatus,
+        workerId, { error: error.trim(), retryDelayMs, attempt: job.attempts }, now);
+      return this.get(id)!;
+    });
   }
 
   cancel(id: string): Job {
@@ -165,12 +221,15 @@ export class JobStore {
     if (!job) throw new Error("job not found");
     if (TERMINAL_STATUSES.has(job.status)) throw new Error("job is already terminal");
     const now = this.clock();
-    this.db.prepare(`
-      UPDATE jobs
-      SET status = 'cancelled', worker_id = NULL, lease_expires_at = NULL, updated_at = ?
-      WHERE id = ?
-    `).run(now, id);
-    return this.get(id)!;
+    return this.transaction(() => {
+      this.db.prepare(`
+        UPDATE jobs
+        SET status = 'cancelled', worker_id = NULL, lease_expires_at = NULL, updated_at = ?
+        WHERE id = ?
+      `).run(now, id);
+      this.recordEvent(id, "cancelled", job.status, "cancelled", job.workerId, {}, now);
+      return this.get(id)!;
+    });
   }
 
   requeueFailed(id: string, delayMs = 0): Job {
@@ -179,13 +238,16 @@ export class JobStore {
     if (!job) throw new Error("job not found");
     if (job.status !== "failed") throw new Error("only failed jobs can be requeued");
     const now = this.clock();
-    this.db.prepare(`
-      UPDATE jobs
-      SET status = 'queued', attempts = 0, available_at = ?, worker_id = NULL,
-          lease_expires_at = NULL, result = NULL, error = NULL, updated_at = ?
-      WHERE id = ?
-    `).run(now + delayMs, now, id);
-    return this.get(id)!;
+    return this.transaction(() => {
+      this.db.prepare(`
+        UPDATE jobs
+        SET status = 'queued', attempts = 0, available_at = ?, worker_id = NULL,
+            lease_expires_at = NULL, result = NULL, error = NULL, updated_at = ?
+        WHERE id = ?
+      `).run(now + delayMs, now, id);
+      this.recordEvent(id, "redriven", "failed", "queued", null, { delayMs }, now);
+      return this.get(id)!;
+    });
   }
 
   stats(): QueueStats {
@@ -202,18 +264,52 @@ export class JobStore {
   }
 
   private recoverExpiredLeases(now: number): void {
+    const expired = this.db.prepare(`
+      SELECT id, attempts, max_attempts, worker_id FROM jobs
+      WHERE status = 'running' AND lease_expires_at <= ?
+    `).all(now) as Array<{ id: string; attempts: number; max_attempts: number; worker_id: string | null }>;
+
+    for (const job of expired) {
+      const exhausted = job.attempts >= job.max_attempts;
+      const toStatus: JobStatus = exhausted ? "failed" : "queued";
+      const error = exhausted ? "lease expired after final attempt" : "worker lease expired";
+      this.db.prepare(`
+        UPDATE jobs
+        SET status = ?, error = ?, worker_id = NULL, lease_expires_at = NULL,
+            available_at = ?, updated_at = ?
+        WHERE id = ? AND status = 'running' AND lease_expires_at <= ?
+      `).run(toStatus, error, now, now, job.id, now);
+      this.recordEvent(job.id, "lease_expired", "running", toStatus, job.worker_id,
+        { exhausted, attempt: job.attempts }, now);
+    }
+  }
+
+  private transaction<T>(operation: () => T): T {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const result = operation();
+      this.db.exec("COMMIT");
+      return result;
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  private recordEvent(
+    jobId: string,
+    type: JobEventType,
+    fromStatus: JobStatus | null,
+    toStatus: JobStatus,
+    workerId: string | null,
+    detail: Record<string, unknown>,
+    createdAt: number,
+  ): void {
     this.db.prepare(`
-      UPDATE jobs
-      SET status = 'failed', error = 'lease expired after final attempt',
-          worker_id = NULL, lease_expires_at = NULL, updated_at = ?
-      WHERE status = 'running' AND lease_expires_at <= ? AND attempts >= max_attempts
-    `).run(now, now);
-    this.db.prepare(`
-      UPDATE jobs
-      SET status = 'queued', error = 'worker lease expired',
-          worker_id = NULL, lease_expires_at = NULL, available_at = ?, updated_at = ?
-      WHERE status = 'running' AND lease_expires_at <= ? AND attempts < max_attempts
-    `).run(now, now, now);
+      INSERT INTO job_events (
+        job_id, event_type, from_status, to_status, worker_id, detail, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(jobId, type, fromStatus, toStatus, workerId, JSON.stringify(detail), createdAt);
   }
 
   private toJob(row: JobRow): Job {
@@ -232,6 +328,19 @@ export class JobStore {
       error: row.error === null ? null : String(row.error),
       createdAt: Number(row.created_at),
       updatedAt: Number(row.updated_at),
+    };
+  }
+
+  private toEvent(row: JobRow): JobEvent {
+    return {
+      id: Number(row.id),
+      jobId: String(row.job_id),
+      type: row.event_type as JobEventType,
+      fromStatus: row.from_status === null ? null : row.from_status as JobStatus,
+      toStatus: row.to_status as JobStatus,
+      workerId: row.worker_id === null ? null : String(row.worker_id),
+      detail: JSON.parse(String(row.detail)) as Record<string, unknown>,
+      createdAt: Number(row.created_at),
     };
   }
 }

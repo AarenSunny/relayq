@@ -1,5 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
+import { dashboardHtml } from "./dashboard.ts";
 import { JobStore } from "./store.ts";
 import type { JobStatus } from "./types.ts";
 
@@ -8,6 +9,31 @@ const VALID_STATUSES = new Set<JobStatus>(["queued", "running", "succeeded", "fa
 function json(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
   response.end(JSON.stringify(body));
+}
+
+function streamEvents(request: IncomingMessage, response: ServerResponse, store: JobStore, url: URL): void {
+  const headerCursor = Array.isArray(request.headers["last-event-id"])
+    ? request.headers["last-event-id"][0]
+    : request.headers["last-event-id"];
+  let cursor = Number(headerCursor ?? url.searchParams.get("after") ?? 0);
+  if (!Number.isInteger(cursor) || cursor < 0) cursor = 0;
+  response.writeHead(200, {
+    "content-type": "text/event-stream",
+    "cache-control": "no-cache, no-transform",
+    connection: "keep-alive",
+  });
+  response.write("retry: 1000\n\n");
+
+  const publish = () => {
+    for (const event of store.listEvents(undefined, cursor, 100)) {
+      cursor = event.id;
+      response.write(`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`);
+    }
+  };
+  publish();
+  const poller = setInterval(publish, 500);
+  const keepAlive = setInterval(() => response.write(": keep-alive\n\n"), 15_000);
+  request.on("close", () => { clearInterval(poller); clearInterval(keepAlive); });
 }
 
 async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {
@@ -32,11 +58,24 @@ export function createRelayServer(store: JobStore): Server {
     const method = request.method ?? "GET";
 
     try {
+      if (method === "GET" && url.pathname === "/") {
+        response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+        return response.end(dashboardHtml);
+      }
       if (method === "GET" && url.pathname === "/health") {
         return json(response, 200, { status: "ok" });
       }
       if (method === "GET" && url.pathname === "/stats") {
         return json(response, 200, store.stats());
+      }
+      if (method === "GET" && url.pathname === "/events") {
+        const jobId = url.searchParams.get("jobId") ?? undefined;
+        const after = Number(url.searchParams.get("after") ?? 0);
+        const limit = Number(url.searchParams.get("limit") ?? 100);
+        return json(response, 200, { events: store.listEvents(jobId, after, limit) });
+      }
+      if (method === "GET" && url.pathname === "/events/stream") {
+        return streamEvents(request, response, store, url);
       }
       if (method === "POST" && url.pathname === "/jobs") {
         const body = await readJson(request);

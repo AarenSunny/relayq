@@ -33,3 +33,25 @@ export interface QueueStats {
   cancelled: number;
   total: number;
 }
+
+export type JobEventType =
+  | "enqueued"
+  | "claimed"
+  | "lease_renewed"
+  | "lease_expired"
+  | "completed"
+  | "retry_scheduled"
+  | "dead_lettered"
+  | "cancelled"
+  | "redriven";
+
+export interface JobEvent {
+  id: number;
+  jobId: string;
+  type: JobEventType;
+  fromStatus: JobStatus | null;
+  toStatus: JobStatus;
+  workerId: string | null;
+  detail: Record<string, unknown>;
+  createdAt: number;
+}

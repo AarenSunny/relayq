@@ -4,8 +4,8 @@ RelayQ currently has three deliberately small components:
 
 ```text
 producer --> HTTP control plane --> SQLite job store <-- worker pool
-                 |                      |
-                 +---- read APIs -------+-- durable leases and retries
+                 |          |           |
+            SSE dashboard   +-- read APIs +-- durable leases and retries
 ```
 
 ## Delivery model
@@ -42,6 +42,19 @@ attempt count, and timestamps stay available for diagnosis. The `/dead-letter`
 view isolates those records operationally. Requeueing is an explicit action that
 resets attempts and clears the old error, preventing accidental infinite retry
 loops while preserving the job identity for auditability.
+
+## Event log and live views
+
+Every state mutation appends a structured row to `job_events` in the same
+SQLite transaction. Monotonic event IDs make the log suitable for cursor-based
+queries and reconnectable streaming. The dashboard uses Server-Sent Events
+rather than WebSockets because updates flow in one direction and the browser's
+native client automatically reconnects with its last received event ID.
+
+The HTTP process polls for newly committed event IDs at 500 ms intervals. This
+keeps the MVP dependency-free and works across multiple processes sharing the
+database. A production adapter could replace polling with PostgreSQL `LISTEN /
+NOTIFY` or a dedicated event broker without changing the public protocol.
 
 ## Trust boundaries
 

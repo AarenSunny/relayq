@@ -18,6 +18,8 @@ protocol, and HTTP control plane are implemented in this repository.
 - Renewable leases for handlers that outlive their initial claim
 - Explicit success, failure, cancellation, and retry transitions
 - Dead-letter inspection and operator-controlled redrive
+- Durable, ordered event history for every job transition
+- Live browser dashboard powered by Server-Sent Events
 - HTTP endpoints for producers, workers, inspection, and queue statistics
 - Example worker with `sum`, `uppercase`, and `sleep` task handlers
 - Unit and end-to-end HTTP tests with no third-party runtime dependencies
@@ -36,6 +38,9 @@ In another terminal, start a worker:
 ```bash
 npm run worker
 ```
+
+Open `http://localhost:8080` to watch queue counts, jobs, and lifecycle events
+update live. The dashboard can also enqueue work for the example worker.
 
 Submit a job:
 
@@ -69,6 +74,8 @@ The default database is `relayq.db`. Set `RELAYQ_DB`, `PORT`, `RELAYQ_URL`,
 | `POST` | `/jobs/:id/heartbeat` | Renew a worker-owned lease |
 | `GET` | `/dead-letter` | Inspect jobs that exhausted retries |
 | `POST` | `/jobs/:id/requeue` | Redrive a failed job with fresh attempts |
+| `GET` | `/events` | Query durable lifecycle events by cursor or job |
+| `GET` | `/events/stream` | Subscribe to live events with SSE |
 | `GET` | `/stats` | Return counts by state |
 | `GET` | `/health` | Liveness check |
 
@@ -79,16 +86,16 @@ concurrency strategy, tradeoffs, and trust boundaries.
 
 - Exponential backoff with configurable jitter
 - Bulk dead-letter redrive and retention policies
-- Server-sent events dashboard
+- Dashboard filtering and per-job timeline views
 - PostgreSQL storage adapter and multi-node control plane
 - Worker authentication, rate limiting, and structured audit events
 - Docker Compose demo and load/failure benchmark
 
 ## Status
 
-The durable queue MVP, renewable worker leases, and dead-letter recovery are
-operational. The next milestone is structured event history plus an observable
-web dashboard.
+The durable queue MVP now includes renewable leases, failed-job recovery,
+transactional event history, and a live control-room dashboard. The next
+milestone is production packaging and load/failure benchmarking.
 
 ## License
 

@@ -103,3 +103,16 @@ test("workers renew leases and operators recover dead-lettered jobs", async () =
   assert.equal(requeued.status, "queued");
   assert.equal(requeued.attempts, 0);
 });
+
+test("dashboard and durable event history are exposed", async () => {
+  const dashboard = await fetch(`${baseUrl}/`);
+  assert.equal(dashboard.status, 200);
+  assert.match(await dashboard.text(), /RelayQ Control Room/);
+
+  const response = await fetch(`${baseUrl}/events?limit=100`);
+  assert.equal(response.status, 200);
+  const body = await response.json() as { events: Array<{ id: number; type: string; jobId: string }> };
+  assert.ok(body.events.length >= 6);
+  assert.ok(body.events.some((event) => event.type === "completed"));
+  assert.ok(body.events.every((event, index) => index === 0 || body.events[index - 1].id < event.id));
+});

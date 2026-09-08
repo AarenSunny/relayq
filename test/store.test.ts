@@ -15,6 +15,9 @@ test("claims by priority and completes with a result", () => {
   assert.equal(completed.status, "succeeded");
   assert.equal(completed.result, 7);
   assert.equal(store.claim("worker-a")?.id, low.id);
+  const events = store.listEvents(high.id);
+  assert.deepEqual(events.map((event) => event.type), ["enqueued", "claimed", "completed"]);
+  assert.deepEqual(events.map((event) => event.toStatus), ["queued", "running", "succeeded"]);
   store.close();
 });
 
@@ -33,6 +36,9 @@ test("an expired lease makes work available to another worker", () => {
   now += 1_001;
   assert.equal(store.claim("third-worker"), null);
   assert.equal(store.get(job.id)?.status, "failed");
+  assert.deepEqual(store.listEvents(job.id).map((event) => event.type), [
+    "enqueued", "claimed", "lease_expired", "claimed", "lease_expired",
+  ]);
   store.close();
 });
 
@@ -92,5 +98,17 @@ test("an operator can requeue a dead-lettered job with a fresh attempt budget", 
   assert.equal(store.claim("worker-b"), null);
   now += 1;
   assert.equal(store.claim("worker-b")?.id, job.id);
+  store.close();
+});
+
+test("event cursors return only newer state transitions", () => {
+  const store = new JobStore(":memory:");
+  const job = store.enqueue({ type: "sum" });
+  const firstEvent = store.listEvents(job.id)[0];
+  store.claim("worker-a");
+  store.complete(job.id, "worker-a", 0);
+  const newer = store.listEvents(job.id, firstEvent.id);
+  assert.deepEqual(newer.map((event) => event.type), ["claimed", "completed"]);
+  assert.ok(newer.every((event) => event.id > firstEvent.id));
   store.close();
 });
