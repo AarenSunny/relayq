@@ -35,6 +35,15 @@ Eligible jobs are ordered by descending integer priority, then FIFO creation
 time. `available_at` supports delayed jobs and retry backoff without a separate
 timer service.
 
+## Retry scheduling
+
+Retry policy is durable job metadata rather than worker configuration. After a
+failed attempt, the store computes capped exponential backoff and applies
+bounded random jitter before updating `available_at`. The state change and its
+chosen delay are written to the event log atomically, making retry decisions
+observable and reproducible in tests with an injected random source. See the
+[retry policy guide](RETRY_POLICY.md) for the formula and defaults.
+
 ## Dead-letter recovery
 
 Permanently failed work remains in the main jobs table so its payload, error,

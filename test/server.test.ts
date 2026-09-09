@@ -116,3 +116,35 @@ test("dashboard and durable event history are exposed", async () => {
   assert.ok(body.events.some((event) => event.type === "completed"));
   assert.ok(body.events.every((event, index) => index === 0 || body.events[index - 1].id < event.id));
 });
+
+test("HTTP workers inherit the producer's retry policy", async () => {
+  const created = await fetch(`${baseUrl}/jobs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      type: "network-call",
+      priority: 99,
+      maxAttempts: 3,
+      backoffBaseMs: 500,
+      backoffMaxMs: 500,
+      backoffJitter: 0,
+    }),
+  }).then((response) => response.json()) as { id: string; backoffBaseMs: number };
+  assert.equal(created.backoffBaseMs, 500);
+
+  const claimed = await fetch(`${baseUrl}/workers/retry-worker/claim`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ leaseMs: 5_000 }),
+  }).then((response) => response.json()) as { id: string };
+  assert.equal(claimed.id, created.id);
+
+  const failedAt = Date.now();
+  const retried = await fetch(`${baseUrl}/jobs/${created.id}/fail`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ workerId: "retry-worker", error: "upstream unavailable" }),
+  }).then((response) => response.json()) as { status: string; availableAt: number };
+  assert.equal(retried.status, "queued");
+  assert.ok(retried.availableAt >= failedAt + 500);
+});

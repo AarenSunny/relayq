@@ -13,6 +13,7 @@ protocol, and HTTP control plane are implemented in this repository.
 
 - Durable priority queue with FIFO ordering inside each priority
 - Delayed jobs and configurable attempt budgets
+- Per-job exponential retry backoff with caps and jitter
 - Atomic worker leases that prevent double claims
 - Automatic recovery after worker crashes
 - Renewable leases for handlers that outlive their initial claim
@@ -55,7 +56,7 @@ Submit a job:
 ```bash
 curl -s http://localhost:8080/jobs \
   -H 'content-type: application/json' \
-  -d '{"type":"sum","payload":[20,22],"priority":5}'
+  -d '{"type":"sum","payload":[20,22],"priority":5,"maxAttempts":4}'
 ```
 
 Inspect the queue:
@@ -90,11 +91,11 @@ The default database is `relayq.db`. Set `RELAYQ_DB`, `PORT`, `RELAYQ_URL`,
 See [the architecture notes](docs/ARCHITECTURE.md) for the delivery guarantees,
 concurrency strategy, tradeoffs, and trust boundaries. The
 [operations guide](docs/OPERATIONS.md) covers containers, benchmarking, and a
-reproducible worker-crash demonstration.
+reproducible worker-crash demonstration. [Retry policy documentation](docs/RETRY_POLICY.md)
+explains the backoff formula, jitter, overrides, and migration behavior.
 
 ## Roadmap
 
-- Exponential backoff with configurable jitter
 - Bulk dead-letter redrive and retention policies
 - Dashboard filtering and per-job timeline views
 - PostgreSQL storage adapter and multi-node control plane
@@ -105,8 +106,9 @@ reproducible worker-crash demonstration.
 
 The durable queue MVP now includes renewable leases, failed-job recovery,
 transactional event history, a live control-room dashboard, container packaging,
-and repeatable performance and failure demonstrations. The next milestone is an
-exponential retry policy and stronger API hardening.
+and repeatable performance and failure demonstrations. Retry scheduling now uses
+per-job capped exponential backoff with jitter. The next milestone is stronger
+API hardening and administrative queue controls.
 
 ## License
 

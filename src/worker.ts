@@ -66,7 +66,7 @@ async function run(): Promise<void> {
         const message = error instanceof Error ? error.message : String(error);
         await request(`/jobs/${job.id}/fail`, {
           method: "POST",
-          body: JSON.stringify({ workerId, error: message, retryDelayMs: 1_000 }),
+          body: JSON.stringify({ workerId, error: message }),
         });
         console.error(`failed ${job.id}: ${message}`);
       } finally {

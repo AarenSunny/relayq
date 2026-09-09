@@ -85,6 +85,9 @@ export function createRelayServer(store: JobStore): Server {
           priority: body.priority === undefined ? undefined : Number(body.priority),
           maxAttempts: body.maxAttempts === undefined ? undefined : Number(body.maxAttempts),
           delayMs: body.delayMs === undefined ? undefined : Number(body.delayMs),
+          backoffBaseMs: body.backoffBaseMs === undefined ? undefined : Number(body.backoffBaseMs),
+          backoffMaxMs: body.backoffMaxMs === undefined ? undefined : Number(body.backoffMaxMs),
+          backoffJitter: body.backoffJitter === undefined ? undefined : Number(body.backoffJitter),
         });
         return json(response, 201, job);
       }
@@ -149,7 +152,7 @@ export function createRelayServer(store: JobStore): Server {
           failMatch[1],
           String(body.workerId ?? ""),
           String(body.error ?? ""),
-          body.retryDelayMs === undefined ? 0 : Number(body.retryDelayMs),
+          body.retryDelayMs === undefined ? undefined : Number(body.retryDelayMs),
         ));
       }
 

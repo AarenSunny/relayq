@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import type { Job, JobEvent, JobEventType, JobStatus, NewJob, QueueStats } from "./types.ts";
 
 type Clock = () => number;
+type Random = () => number;
 type JobRow = Record<string, unknown>;
 
 const TERMINAL_STATUSES = new Set<JobStatus>(["succeeded", "failed", "cancelled"]);
@@ -10,10 +11,12 @@ const TERMINAL_STATUSES = new Set<JobStatus>(["succeeded", "failed", "cancelled"
 export class JobStore {
   private readonly db: DatabaseSync;
   private readonly clock: Clock;
+  private readonly random: Random;
 
-  constructor(filename = "relayq.db", clock: Clock = Date.now) {
+  constructor(filename = "relayq.db", clock: Clock = Date.now, random: Random = Math.random) {
     this.db = new DatabaseSync(filename);
     this.clock = clock;
+    this.random = random;
     this.db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS jobs (
@@ -23,6 +26,9 @@ export class JobStore {
         status TEXT NOT NULL CHECK(status IN ('queued','running','succeeded','failed','cancelled')),
         priority INTEGER NOT NULL,
         max_attempts INTEGER NOT NULL CHECK(max_attempts > 0),
+        backoff_base_ms INTEGER NOT NULL DEFAULT 1000,
+        backoff_max_ms INTEGER NOT NULL DEFAULT 60000,
+        backoff_jitter REAL NOT NULL DEFAULT 0.2,
         attempts INTEGER NOT NULL DEFAULT 0,
         available_at INTEGER NOT NULL,
         lease_expires_at INTEGER,
@@ -47,6 +53,9 @@ export class JobStore {
       );
       CREATE INDEX IF NOT EXISTS job_events_job_id ON job_events(job_id, id);
     `);
+    this.ensureColumn("backoff_base_ms", "INTEGER NOT NULL DEFAULT 1000");
+    this.ensureColumn("backoff_max_ms", "INTEGER NOT NULL DEFAULT 60000");
+    this.ensureColumn("backoff_jitter", "REAL NOT NULL DEFAULT 0.2");
   }
 
   close(): void {
@@ -58,23 +67,38 @@ export class JobStore {
     const priority = input.priority ?? 0;
     const maxAttempts = input.maxAttempts ?? 3;
     const delayMs = input.delayMs ?? 0;
+    const backoffBaseMs = input.backoffBaseMs ?? 1_000;
+    const backoffMaxMs = input.backoffMaxMs ?? 60_000;
+    const backoffJitter = input.backoffJitter ?? 0.2;
     if (!Number.isInteger(priority)) throw new Error("priority must be an integer");
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
       throw new Error("maxAttempts must be a positive integer");
     }
     if (!Number.isFinite(delayMs) || delayMs < 0) throw new Error("delayMs must be non-negative");
+    if (!Number.isInteger(backoffBaseMs) || backoffBaseMs < 0) {
+      throw new Error("backoffBaseMs must be a non-negative integer");
+    }
+    if (!Number.isInteger(backoffMaxMs) || backoffMaxMs < backoffBaseMs) {
+      throw new Error("backoffMaxMs must be an integer at least as large as backoffBaseMs");
+    }
+    if (!Number.isFinite(backoffJitter) || backoffJitter < 0 || backoffJitter > 1) {
+      throw new Error("backoffJitter must be between 0 and 1");
+    }
 
     const now = this.clock();
     const id = randomUUID();
     this.transaction(() => {
       this.db.prepare(`
         INSERT INTO jobs (
-          id, type, payload, status, priority, max_attempts, attempts,
+          id, type, payload, status, priority, max_attempts,
+          backoff_base_ms, backoff_max_ms, backoff_jitter, attempts,
           available_at, created_at, updated_at
-        ) VALUES (?, ?, ?, 'queued', ?, ?, 0, ?, ?, ?)
+        ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, 0, ?, ?, ?)
       `).run(id, input.type.trim(), JSON.stringify(input.payload ?? null), priority,
-        maxAttempts, now + delayMs, now, now);
-      this.recordEvent(id, "enqueued", null, "queued", null, { priority, delayMs, maxAttempts }, now);
+        maxAttempts, backoffBaseMs, backoffMaxMs, backoffJitter, now + delayMs, now, now);
+      this.recordEvent(id, "enqueued", null, "queued", null, {
+        priority, delayMs, maxAttempts, backoffBaseMs, backoffMaxMs, backoffJitter,
+      }, now);
     });
     return this.get(id)!;
   }
@@ -190,9 +214,9 @@ export class JobStore {
     });
   }
 
-  fail(id: string, workerId: string, error: string, retryDelayMs = 0): Job {
+  fail(id: string, workerId: string, error: string, retryDelayMs?: number): Job {
     if (!error?.trim()) throw new Error("error is required");
-    if (!Number.isFinite(retryDelayMs) || retryDelayMs < 0) {
+    if (retryDelayMs !== undefined && (!Number.isFinite(retryDelayMs) || retryDelayMs < 0)) {
       throw new Error("retryDelayMs must be non-negative");
     }
     const job = this.get(id);
@@ -202,6 +226,7 @@ export class JobStore {
 
     const now = this.clock();
     const exhausted = job.attempts >= job.maxAttempts;
+    const delayMs = exhausted ? 0 : retryDelayMs ?? this.retryDelay(job);
     return this.transaction(() => {
       const toStatus = exhausted ? "failed" : "queued";
       this.db.prepare(`
@@ -209,9 +234,9 @@ export class JobStore {
         SET status = ?, error = ?, worker_id = NULL, lease_expires_at = NULL,
             available_at = ?, updated_at = ?
         WHERE id = ?
-      `).run(toStatus, error.trim(), now + retryDelayMs, now, id);
+      `).run(toStatus, error.trim(), now + delayMs, now, id);
       this.recordEvent(id, exhausted ? "dead_lettered" : "retry_scheduled", "running", toStatus,
-        workerId, { error: error.trim(), retryDelayMs, attempt: job.attempts }, now);
+        workerId, { error: error.trim(), retryDelayMs: delayMs, attempt: job.attempts }, now);
       return this.get(id)!;
     });
   }
@@ -284,6 +309,21 @@ export class JobStore {
     }
   }
 
+  private retryDelay(job: Job): number {
+    const exponent = Math.max(0, job.attempts - 1);
+    const uncapped = job.backoffBaseMs * (2 ** exponent);
+    const capped = Math.min(uncapped, job.backoffMaxMs);
+    const jitterMultiplier = 1 + ((this.random() * 2 - 1) * job.backoffJitter);
+    return Math.max(0, Math.round(capped * jitterMultiplier));
+  }
+
+  private ensureColumn(name: string, definition: string): void {
+    const columns = this.db.prepare("PRAGMA table_info(jobs)").all() as Array<{ name: string }>;
+    if (!columns.some((column) => column.name === name)) {
+      this.db.exec(`ALTER TABLE jobs ADD COLUMN ${name} ${definition}`);
+    }
+  }
+
   private transaction<T>(operation: () => T): T {
     this.db.exec("BEGIN IMMEDIATE");
     try {
@@ -320,6 +360,9 @@ export class JobStore {
       status: row.status as JobStatus,
       priority: Number(row.priority),
       maxAttempts: Number(row.max_attempts),
+      backoffBaseMs: Number(row.backoff_base_ms),
+      backoffMaxMs: Number(row.backoff_max_ms),
+      backoffJitter: Number(row.backoff_jitter),
       attempts: Number(row.attempts),
       availableAt: Number(row.available_at),
       leaseExpiresAt: row.lease_expires_at === null ? null : Number(row.lease_expires_at),

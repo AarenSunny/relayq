@@ -8,6 +8,9 @@ export interface Job {
   priority: number;
   maxAttempts: number;
   attempts: number;
+  backoffBaseMs: number;
+  backoffMaxMs: number;
+  backoffJitter: number;
   availableAt: number;
   leaseExpiresAt: number | null;
   workerId: string | null;
@@ -23,6 +26,9 @@ export interface NewJob {
   priority?: number;
   maxAttempts?: number;
   delayMs?: number;
+  backoffBaseMs?: number;
+  backoffMaxMs?: number;
+  backoffJitter?: number;
 }
 
 export interface QueueStats {

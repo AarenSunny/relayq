@@ -46,7 +46,7 @@ test("failure retries until maxAttempts is exhausted", () => {
   const store = new JobStore(":memory:");
   const job = store.enqueue({ type: "bad", maxAttempts: 2 });
   store.claim("worker-a");
-  assert.equal(store.fail(job.id, "worker-a", "first failure").status, "queued");
+  assert.equal(store.fail(job.id, "worker-a", "first failure", 0).status, "queued");
   store.claim("worker-b");
   const failed = store.fail(job.id, "worker-b", "second failure");
   assert.equal(failed.status, "failed");
@@ -111,4 +111,43 @@ test("event cursors return only newer state transitions", () => {
   assert.deepEqual(newer.map((event) => event.type), ["claimed", "completed"]);
   assert.ok(newer.every((event) => event.id > firstEvent.id));
   store.close();
+});
+
+test("automatic retries use exponential backoff and respect the cap", () => {
+  let now = 50_000;
+  const store = new JobStore(":memory:", () => now, () => 0.5);
+  const job = store.enqueue({
+    type: "flaky",
+    maxAttempts: 4,
+    backoffBaseMs: 100,
+    backoffMaxMs: 250,
+    backoffJitter: 0,
+  });
+
+  store.claim("worker-a");
+  assert.equal(store.fail(job.id, "worker-a", "attempt one").availableAt, 50_100);
+  now = 50_100;
+  store.claim("worker-a");
+  assert.equal(store.fail(job.id, "worker-a", "attempt two").availableAt, 50_300);
+  now = 50_300;
+  store.claim("worker-a");
+  const thirdRetry = store.fail(job.id, "worker-a", "attempt three");
+  assert.equal(thirdRetry.availableAt, 50_550);
+  assert.equal(store.listEvents(job.id).at(-1)?.detail.retryDelayMs, 250);
+  store.close();
+});
+
+test("retry jitter is deterministic when a random source is supplied", () => {
+  let now = 60_000;
+  const low = new JobStore(":memory:", () => now, () => 0);
+  const lowJob = low.enqueue({ type: "flaky", backoffBaseMs: 1_000, backoffJitter: 0.25 });
+  low.claim("worker");
+  assert.equal(low.fail(lowJob.id, "worker", "low jitter").availableAt, 60_750);
+  low.close();
+
+  const high = new JobStore(":memory:", () => now, () => 1);
+  const highJob = high.enqueue({ type: "flaky", backoffBaseMs: 1_000, backoffJitter: 0.25 });
+  high.claim("worker");
+  assert.equal(high.fail(highJob.id, "worker", "high jitter").availableAt, 61_250);
+  high.close();
 });
