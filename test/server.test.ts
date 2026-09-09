@@ -148,3 +148,33 @@ test("HTTP workers inherit the producer's retry policy", async () => {
   assert.equal(retried.status, "queued");
   assert.ok(retried.availableAt >= failedAt + 500);
 });
+
+test("operators can pause and resume claims over HTTP", async () => {
+  const created = await fetch(`${baseUrl}/jobs`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ type: "paused-work", priority: 200 }),
+  }).then((response) => response.json()) as { id: string };
+
+  const paused = await fetch(`${baseUrl}/admin/pause`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ reason: "integration test" }),
+  }).then((response) => response.json()) as { paused: boolean; reason: string };
+  assert.deepEqual({ paused: paused.paused, reason: paused.reason }, { paused: true, reason: "integration test" });
+
+  const emptyClaim = await fetch(`${baseUrl}/workers/paused-worker/claim`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(emptyClaim.status, 204);
+
+  await fetch(`${baseUrl}/admin/resume`, { method: "POST" });
+  const claim = await fetch(`${baseUrl}/workers/resumed-worker/claim`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: "{}",
+  }).then((response) => response.json()) as { id: string };
+  assert.equal(claim.id, created.id);
+});

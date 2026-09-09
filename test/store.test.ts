@@ -151,3 +151,21 @@ test("retry jitter is deterministic when a random source is supplied", () => {
   assert.equal(high.fail(highJob.id, "worker", "high jitter").availableAt, 61_250);
   high.close();
 });
+
+test("pausing prevents new claims while preserving queued work", () => {
+  let now = 70_000;
+  const store = new JobStore(":memory:", () => now);
+  const job = store.enqueue({ type: "maintenance-safe" });
+  const paused = store.pause("database maintenance");
+  assert.equal(paused.paused, true);
+  assert.equal(paused.reason, "database maintenance");
+  assert.equal(store.claim("worker"), null);
+  assert.equal(store.get(job.id)?.status, "queued");
+
+  now += 1_000;
+  const resumed = store.resume();
+  assert.equal(resumed.paused, false);
+  assert.equal(resumed.updatedAt, now);
+  assert.equal(store.claim("worker")?.id, job.id);
+  store.close();
+});

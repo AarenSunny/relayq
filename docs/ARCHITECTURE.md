@@ -67,6 +67,16 @@ NOTIFY` or a dedicated event broker without changing the public protocol.
 
 ## Trust boundaries
 
-The MVP is intended for a trusted local network. Authentication, TLS, tenant
-isolation, payload schemas, rate limiting, and audit logging are planned before
-an internet-facing deployment.
+The MVP is intended for a trusted local network. An optional bearer token uses
+constant-time comparison to protect all mutations. Read APIs remain open for
+the dashboard and health probes. TLS, tenant isolation, scoped identities, rate
+limiting, and administrative audit logging are still required before an
+internet-facing deployment. See [the security model](SECURITY.md).
+
+## Administrative control
+
+Pause state lives in SQLite rather than process memory, so it survives restarts
+and is observed consistently by every API process. A pause blocks new claims
+but does not discard queued work or prevent current workers from acknowledging
+their leases. Expired leases are still recovered while paused, ensuring work is
+ready when an operator resumes dispatch.

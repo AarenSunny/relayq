@@ -40,6 +40,12 @@ export interface QueueStats {
   total: number;
 }
 
+export interface QueueControl {
+  paused: boolean;
+  reason: string | null;
+  updatedAt: number;
+}
+
 export type JobEventType =
   | "enqueued"
   | "claimed"

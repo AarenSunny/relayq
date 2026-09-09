@@ -8,6 +8,13 @@ Start the API and three independent workers:
 docker compose up --build --scale worker=3
 ```
 
+To protect state-changing endpoints, pass the same API key to the API and
+workers through Compose:
+
+```bash
+RELAYQ_API_KEY='replace-with-a-random-secret' docker compose up --build --scale worker=3
+```
+
 Open <http://localhost:8080>, submit several `sum`, `uppercase`, or `sleep`
 jobs, and watch separate worker IDs claim work in the live activity feed. Queue
 state is stored in the `relayq-data` volume and survives container replacement.
@@ -46,5 +53,7 @@ easy to explain in an interview or screen recording.
 
 - Back up the `/data` volume rather than copying an open database file.
 - A readiness probe should use `/health`; queue depth is available at `/stats`.
+- Pause dispatch during maintenance with `POST /admin/pause`, then restore it
+  with `POST /admin/resume`; current leases can still finish while paused.
 - Scale only the stateless `worker` service in the SQLite configuration.
 - The API is unauthenticated and intended for a trusted demo environment.

@@ -12,6 +12,8 @@ export const dashboardHtml = String.raw`<!doctype html>
     h1 { margin:0; font-size:32px; letter-spacing:-1px; } h1 span { color:var(--blue) } .eyebrow { color:var(--muted); text-transform:uppercase; letter-spacing:2px; font-size:11px; font-weight:700; }
     .connection { display:flex; gap:8px; align-items:center; color:var(--muted); } .dot { width:9px;height:9px;border-radius:50%;background:var(--amber);box-shadow:0 0 12px currentColor; }
     .connection.live .dot { background:var(--green) } .connection.offline .dot { background:var(--red) }
+    .header-actions { display:flex;align-items:center;gap:14px; } .queue-toggle { width:auto;padding:7px 11px;background:#171d26;color:var(--text);border-color:var(--line);font-size:12px; }
+    .queue-toggle.paused { color:var(--green);border-color:#285746; } .queue-paused { color:var(--amber); }
     .stats { display:grid; grid-template-columns:repeat(6,1fr); gap:10px; margin-bottom:18px; }
     .card,.panel { background:color-mix(in srgb,var(--panel) 94%,transparent); border:1px solid var(--line); border-radius:14px; box-shadow:0 18px 50px #0004; }
     .card { padding:16px; } .card b { display:block;font-size:26px;letter-spacing:-1px; } .card span { color:var(--muted);text-transform:uppercase;font-size:10px;letter-spacing:1.2px; }
@@ -25,17 +27,18 @@ export const dashboardHtml = String.raw`<!doctype html>
   </style>
 </head>
 <body><main>
-  <header><div><div class="eyebrow">Distributed job infrastructure</div><h1>Relay<span>Q</span> Control Room</h1></div><div id="connection" class="connection"><i class="dot"></i><span>Connecting</span></div></header>
+  <header><div><div class="eyebrow">Distributed job infrastructure</div><h1>Relay<span>Q</span> Control Room</h1></div><div class="header-actions"><button id="queue-toggle" class="queue-toggle">Pause queue</button><div id="connection" class="connection"><i class="dot"></i><span>Connecting</span></div></div></header>
   <section id="stats" class="stats"></section>
   <div class="grid"><section class="panel"><div class="panel-head"><h2>Recent jobs</h2><span class="eyebrow">priority queue</span></div><div id="jobs"></div></section>
   <aside><section class="panel"><div class="panel-head"><h2>Submit work</h2></div><form id="submit"><label>Task type</label><input name="type" value="sum" required><label>JSON payload</label><textarea name="payload">[20, 22]</textarea><label>Priority</label><input name="priority" type="number" value="0"><button>Enqueue job</button></form></section>
   <section class="panel" style="margin-top:18px"><div class="panel-head"><h2>Live activity</h2><span class="eyebrow">event stream</span></div><div id="activity" class="activity"></div></section></aside></div>
 </main><script>
   const statuses=['queued','running','succeeded','failed','cancelled','total'];
-  const stats=document.querySelector('#stats'), jobs=document.querySelector('#jobs'), activity=document.querySelector('#activity'), connection=document.querySelector('#connection');
+  const stats=document.querySelector('#stats'), jobs=document.querySelector('#jobs'), activity=document.querySelector('#activity'), connection=document.querySelector('#connection'), queueToggle=document.querySelector('#queue-toggle');
   const short=id=>id.slice(0,8); const time=value=>new Date(value).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit',second:'2-digit'});
   async function refresh(){
-    const [counts,list]=await Promise.all([fetch('/stats').then(r=>r.json()),fetch('/jobs?limit=20').then(r=>r.json())]);
+    const [counts,list,control]=await Promise.all([fetch('/stats').then(r=>r.json()),fetch('/jobs?limit=20').then(r=>r.json()),fetch('/admin/state').then(r=>r.json())]);
+    queueToggle.textContent=control.paused?'Resume queue':'Pause queue';queueToggle.dataset.paused=String(control.paused);queueToggle.classList.toggle('paused',control.paused);document.querySelector('.eyebrow').classList.toggle('queue-paused',control.paused);
     stats.replaceChildren(...statuses.map(status=>{const el=document.createElement('div');el.className='card';el.innerHTML='<b></b><span></span>';el.querySelector('b').textContent=counts[status];el.querySelector('span').textContent=status;return el;}));
     if(!list.jobs.length){jobs.innerHTML='<div class="empty">No jobs have been submitted.</div>';return;}
     const table=document.createElement('table');table.innerHTML='<thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Attempt</th><th>Priority</th></tr></thead><tbody></tbody>';
@@ -46,5 +49,6 @@ export const dashboardHtml = String.raw`<!doctype html>
   fetch('/events?limit=20').then(r=>r.json()).then(({events})=>events.forEach(showEvent));
   const stream=new EventSource('/events/stream');stream.onopen=()=>{connection.className='connection live';connection.querySelector('span').textContent='Live';};stream.onerror=()=>{connection.className='connection offline';connection.querySelector('span').textContent='Reconnecting';};stream.onmessage=message=>{showEvent(JSON.parse(message.data));refresh();};
   document.querySelector('#submit').addEventListener('submit',async event=>{event.preventDefault();const data=new FormData(event.currentTarget);let payload;try{payload=JSON.parse(data.get('payload'));}catch{alert('Payload must be valid JSON');return;}const response=await fetch('/jobs',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({type:data.get('type'),payload,priority:Number(data.get('priority'))})});if(!response.ok)alert((await response.json()).error);});
+  queueToggle.addEventListener('click',async()=>{const action=queueToggle.dataset.paused==='true'?'resume':'pause';const response=await fetch('/admin/'+action,{method:'POST',headers:{'content-type':'application/json'},body:action==='pause'?JSON.stringify({reason:'Paused from dashboard'}):undefined});if(!response.ok)alert((await response.json()).error);await refresh();});
   refresh(); setInterval(refresh,10000);
 </script></body></html>`;

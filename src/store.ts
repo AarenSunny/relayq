@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
-import type { Job, JobEvent, JobEventType, JobStatus, NewJob, QueueStats } from "./types.ts";
+import type { Job, JobEvent, JobEventType, JobStatus, NewJob, QueueControl, QueueStats } from "./types.ts";
 
 type Clock = () => number;
 type Random = () => number;
@@ -52,7 +52,17 @@ export class JobStore {
         created_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS job_events_job_id ON job_events(job_id, id);
+      CREATE TABLE IF NOT EXISTS queue_control (
+        id INTEGER PRIMARY KEY CHECK(id = 1),
+        paused INTEGER NOT NULL DEFAULT 0,
+        reason TEXT,
+        updated_at INTEGER NOT NULL
+      );
     `);
+    this.db.prepare(`
+      INSERT OR IGNORE INTO queue_control (id, paused, reason, updated_at)
+      VALUES (1, 0, NULL, ?)
+    `).run(this.clock());
     this.ensureColumn("backoff_base_ms", "INTEGER NOT NULL DEFAULT 1000");
     this.ensureColumn("backoff_max_ms", "INTEGER NOT NULL DEFAULT 60000");
     this.ensureColumn("backoff_jitter", "REAL NOT NULL DEFAULT 0.2");
@@ -148,6 +158,29 @@ export class JobStore {
     return rows.map((row) => this.toEvent(row));
   }
 
+  control(): QueueControl {
+    const row = this.db.prepare("SELECT paused, reason, updated_at FROM queue_control WHERE id = 1").get() as
+      { paused: number; reason: string | null; updated_at: number };
+    return { paused: row.paused === 1, reason: row.reason, updatedAt: Number(row.updated_at) };
+  }
+
+  pause(reason?: string): QueueControl {
+    const now = this.clock();
+    const normalizedReason = reason?.trim() || null;
+    this.db.prepare(`
+      UPDATE queue_control SET paused = 1, reason = ?, updated_at = ? WHERE id = 1
+    `).run(normalizedReason, now);
+    return this.control();
+  }
+
+  resume(): QueueControl {
+    const now = this.clock();
+    this.db.prepare(`
+      UPDATE queue_control SET paused = 0, reason = NULL, updated_at = ? WHERE id = 1
+    `).run(now);
+    return this.control();
+  }
+
   claim(workerId: string, leaseMs = 30_000): Job | null {
     if (!workerId?.trim()) throw new Error("workerId is required");
     if (!Number.isFinite(leaseMs) || leaseMs < 1_000) throw new Error("leaseMs must be at least 1000");
@@ -156,6 +189,10 @@ export class JobStore {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.recoverExpiredLeases(now);
+      if (this.control().paused) {
+        this.db.exec("COMMIT");
+        return null;
+      }
       const candidate = this.db.prepare(`
         SELECT id FROM jobs
         WHERE status = 'queued' AND available_at <= ?

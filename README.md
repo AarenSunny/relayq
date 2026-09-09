@@ -14,6 +14,7 @@ protocol, and HTTP control plane are implemented in this repository.
 - Durable priority queue with FIFO ordering inside each priority
 - Delayed jobs and configurable attempt budgets
 - Per-job exponential retry backoff with caps and jitter
+- Persistent pause/resume controls for maintenance windows
 - Atomic worker leases that prevent double claims
 - Automatic recovery after worker crashes
 - Renewable leases for handlers that outlive their initial claim
@@ -26,6 +27,7 @@ protocol, and HTTP control plane are implemented in this repository.
 - Unit and end-to-end HTTP tests with no third-party runtime dependencies
 - Non-root container image and scalable multi-worker Compose demo
 - Reproducible durability benchmark and deterministic crash demonstration
+- Optional bearer-token protection and hardened HTTP request handling
 
 ## Quick start
 
@@ -68,6 +70,7 @@ curl -s http://localhost:8080/stats
 
 The default database is `relayq.db`. Set `RELAYQ_DB`, `PORT`, `RELAYQ_URL`,
 `WORKER_ID`, `POLL_MS`, or `LEASE_MS` to change runtime settings.
+Set `RELAYQ_API_KEY` on both the API and workers to protect mutations.
 
 ## API
 
@@ -87,19 +90,24 @@ The default database is `relayq.db`. Set `RELAYQ_DB`, `PORT`, `RELAYQ_URL`,
 | `GET` | `/events/stream` | Subscribe to live events with SSE |
 | `GET` | `/stats` | Return counts by state |
 | `GET` | `/health` | Liveness check |
+| `GET` | `/admin/state` | Inspect persistent pause state |
+| `POST` | `/admin/pause` | Stop dispatching new work |
+| `POST` | `/admin/resume` | Resume dispatch |
 
 See [the architecture notes](docs/ARCHITECTURE.md) for the delivery guarantees,
 concurrency strategy, tradeoffs, and trust boundaries. The
 [operations guide](docs/OPERATIONS.md) covers containers, benchmarking, and a
 reproducible worker-crash demonstration. [Retry policy documentation](docs/RETRY_POLICY.md)
 explains the backoff formula, jitter, overrides, and migration behavior.
+The [security model](docs/SECURITY.md) documents authentication guarantees and
+the remaining requirements for an internet-facing deployment.
 
 ## Roadmap
 
 - Bulk dead-letter redrive and retention policies
 - Dashboard filtering and per-job timeline views
 - PostgreSQL storage adapter and multi-node control plane
-- Worker authentication, rate limiting, and structured audit events
+- Scoped worker identities, rate limiting, and administrative audit events
 - Multi-host benchmark and automated chaos scenarios
 
 ## Status
@@ -107,8 +115,9 @@ explains the backoff formula, jitter, overrides, and migration behavior.
 The durable queue MVP now includes renewable leases, failed-job recovery,
 transactional event history, a live control-room dashboard, container packaging,
 and repeatable performance and failure demonstrations. Retry scheduling now uses
-per-job capped exponential backoff with jitter. The next milestone is stronger
-API hardening and administrative queue controls.
+per-job capped exponential backoff with jitter. Persistent maintenance controls,
+optional mutation authentication, and defensive request handling are also
+operational. The next milestone is queue retention and bulk administration.
 
 ## License
 

@@ -4,6 +4,7 @@ const baseUrl = process.env.RELAYQ_URL ?? "http://localhost:8080";
 const workerId = process.env.WORKER_ID ?? `worker-${process.env.HOSTNAME ?? process.pid}`;
 const pollMs = Number(process.env.POLL_MS ?? 500);
 const leaseMs = Number(process.env.LEASE_MS ?? 30_000);
+const apiKey = process.env.RELAYQ_API_KEY;
 
 const handlers: Record<string, (payload: unknown) => Promise<unknown>> = {
   sum: async (payload) => {
@@ -26,7 +27,11 @@ const handlers: Record<string, (payload: unknown) => Promise<unknown>> = {
 async function request(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${baseUrl}${path}`, {
     ...init,
-    headers: { "content-type": "application/json", ...init?.headers },
+    headers: {
+      "content-type": "application/json",
+      ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),
+      ...init?.headers,
+    },
   });
 }
 

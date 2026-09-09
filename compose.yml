@@ -5,6 +5,8 @@ services:
       - "8080:8080"
     volumes:
       - relayq-data:/data
+    environment:
+      RELAYQ_API_KEY: ${RELAYQ_API_KEY:-}
     restart: unless-stopped
 
   worker:
@@ -14,6 +16,7 @@ services:
       RELAYQ_URL: http://api:8080
       POLL_MS: "250"
       LEASE_MS: "30000"
+      RELAYQ_API_KEY: ${RELAYQ_API_KEY:-}
     depends_on:
       api:
         condition: service_healthy

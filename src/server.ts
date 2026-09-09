@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { fileURLToPath } from "node:url";
 import { dashboardHtml } from "./dashboard.ts";
@@ -5,6 +6,19 @@ import { JobStore } from "./store.ts";
 import type { JobStatus } from "./types.ts";
 
 const VALID_STATUSES = new Set<JobStatus>(["queued", "running", "succeeded", "failed", "cancelled"]);
+
+export interface ServerOptions {
+  apiKey?: string;
+}
+
+class ApiError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
 
 function json(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { "content-type": "application/json; charset=utf-8" });
@@ -45,6 +59,10 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
     chunks.push(chunk);
   }
   if (chunks.length === 0) return {};
+  const contentType = request.headers["content-type"]?.split(";", 1)[0].trim().toLowerCase();
+  if (contentType !== "application/json") {
+    throw new ApiError(415, "request body must use application/json");
+  }
   const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   if (!value || Array.isArray(value) || typeof value !== "object") {
     throw new Error("request body must be a JSON object");
@@ -52,12 +70,27 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
   return value;
 }
 
-export function createRelayServer(store: JobStore): Server {
+function hasValidApiKey(request: IncomingMessage, expected: string): boolean {
+  const authorization = request.headers.authorization ?? "";
+  const provided = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+  const expectedBytes = Buffer.from(expected);
+  const providedBytes = Buffer.from(provided);
+  return expectedBytes.length === providedBytes.length && timingSafeEqual(expectedBytes, providedBytes);
+}
+
+export function createRelayServer(store: JobStore, options: ServerOptions = {}): Server {
   return createServer(async (request, response) => {
     const url = new URL(request.url ?? "/", "http://relayq.local");
     const method = request.method ?? "GET";
+    response.setHeader("x-content-type-options", "nosniff");
+    response.setHeader("referrer-policy", "no-referrer");
+    response.setHeader("x-frame-options", "DENY");
 
     try {
+      if (options.apiKey && method !== "GET" && !hasValidApiKey(request, options.apiKey)) {
+        response.setHeader("www-authenticate", "Bearer");
+        throw new ApiError(401, "valid bearer token required");
+      }
       if (method === "GET" && url.pathname === "/") {
         response.writeHead(200, { "content-type": "text/html; charset=utf-8" });
         return response.end(dashboardHtml);
@@ -67,6 +100,16 @@ export function createRelayServer(store: JobStore): Server {
       }
       if (method === "GET" && url.pathname === "/stats") {
         return json(response, 200, store.stats());
+      }
+      if (method === "GET" && url.pathname === "/admin/state") {
+        return json(response, 200, store.control());
+      }
+      if (method === "POST" && url.pathname === "/admin/pause") {
+        const body = await readJson(request);
+        return json(response, 200, store.pause(body.reason === undefined ? undefined : String(body.reason)));
+      }
+      if (method === "POST" && url.pathname === "/admin/resume") {
+        return json(response, 200, store.resume());
       }
       if (method === "GET" && url.pathname === "/events") {
         const jobId = url.searchParams.get("jobId") ?? undefined;
@@ -159,7 +202,9 @@ export function createRelayServer(store: JobStore): Server {
       return json(response, 404, { error: "route not found" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "unexpected error";
-      const status = error instanceof SyntaxError ? 400 : message.includes("not found") ? 404 : 409;
+      const status = error instanceof ApiError
+        ? error.status
+        : error instanceof SyntaxError ? 400 : message.includes("not found") ? 404 : 409;
       return json(response, status, { error: message });
     }
   });
@@ -168,7 +213,7 @@ export function createRelayServer(store: JobStore): Server {
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
   const store = new JobStore(process.env.RELAYQ_DB ?? "relayq.db");
-  const server = createRelayServer(store);
+  const server = createRelayServer(store, { apiKey: process.env.RELAYQ_API_KEY });
   const port = Number(process.env.PORT ?? 8080);
   server.listen(port, () => console.log(`RelayQ listening on http://localhost:${port}`));
   const shutdown = () => server.close(() => { store.close(); process.exit(0); });
