@@ -312,6 +312,48 @@ export class JobStore {
     });
   }
 
+  requeueFailedMany(limit = 100, delayMs = 0): Job[] {
+    this.validateBatch(limit, delayMs);
+    const now = this.clock();
+    return this.transaction(() => {
+      const rows = this.db.prepare(`
+        SELECT id FROM jobs WHERE status = 'failed' ORDER BY updated_at ASC, id ASC LIMIT ?
+      `).all(limit) as Array<{ id: string }>;
+      for (const row of rows) {
+        this.db.prepare(`
+          UPDATE jobs
+          SET status = 'queued', attempts = 0, available_at = ?, worker_id = NULL,
+              lease_expires_at = NULL, result = NULL, error = NULL, updated_at = ?
+          WHERE id = ? AND status = 'failed'
+        `).run(now + delayMs, now, row.id);
+        this.recordEvent(row.id, "redriven", "failed", "queued", null, { delayMs, bulk: true }, now);
+      }
+      return rows.map((row) => this.get(row.id)!);
+    });
+  }
+
+  purgeTerminal(olderThanMs: number, limit = 1_000, includeFailed = false): { deleted: number; jobIds: string[] } {
+    if (!Number.isFinite(olderThanMs) || olderThanMs < 0) {
+      throw new Error("olderThanMs must be non-negative");
+    }
+    if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) {
+      throw new Error("limit must be between 1 and 10000");
+    }
+    const cutoff = this.clock() - olderThanMs;
+    return this.transaction(() => {
+      const statusSql = includeFailed
+        ? "status IN ('succeeded', 'cancelled', 'failed')"
+        : "status IN ('succeeded', 'cancelled')";
+      const rows = this.db.prepare(`
+        SELECT id FROM jobs WHERE ${statusSql} AND updated_at <= ?
+        ORDER BY updated_at ASC, id ASC LIMIT ?
+      `).all(cutoff, limit) as Array<{ id: string }>;
+      const remove = this.db.prepare("DELETE FROM jobs WHERE id = ?");
+      for (const row of rows) remove.run(row.id);
+      return { deleted: rows.length, jobIds: rows.map((row) => row.id) };
+    });
+  }
+
   stats(): QueueStats {
     const stats: QueueStats = {
       queued: 0, running: 0, succeeded: 0, failed: 0, cancelled: 0, total: 0,
@@ -352,6 +394,13 @@ export class JobStore {
     const capped = Math.min(uncapped, job.backoffMaxMs);
     const jitterMultiplier = 1 + ((this.random() * 2 - 1) * job.backoffJitter);
     return Math.max(0, Math.round(capped * jitterMultiplier));
+  }
+
+  private validateBatch(limit: number, delayMs: number): void {
+    if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) {
+      throw new Error("limit must be between 1 and 1000");
+    }
+    if (!Number.isFinite(delayMs) || delayMs < 0) throw new Error("delayMs must be non-negative");
   }
 
   private ensureColumn(name: string, definition: string): void {

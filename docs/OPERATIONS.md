@@ -55,5 +55,7 @@ easy to explain in an interview or screen recording.
 - A readiness probe should use `/health`; queue depth is available at `/stats`.
 - Pause dispatch during maintenance with `POST /admin/pause`, then restore it
   with `POST /admin/resume`; current leases can still finish while paused.
+- Redrive and retention calls are bounded. Follow the
+  [administration runbook](ADMINISTRATION.md) for safe maintenance sequences.
 - Scale only the stateless `worker` service in the SQLite configuration.
 - The API is unauthenticated and intended for a trusted demo environment.

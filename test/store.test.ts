@@ -169,3 +169,58 @@ test("pausing prevents new claims while preserving queued work", () => {
   assert.equal(store.claim("worker")?.id, job.id);
   store.close();
 });
+
+test("bulk redrive is bounded and records each recovery", () => {
+  let now = 80_000;
+  const store = new JobStore(":memory:", () => now);
+  const failedIds: string[] = [];
+  for (let index = 0; index < 3; index += 1) {
+    const job = store.enqueue({ type: `failed-${index}`, maxAttempts: 1 });
+    failedIds.push(job.id);
+    store.claim("worker");
+    store.fail(job.id, "worker", "permanent failure");
+  }
+
+  const redriven = store.requeueFailedMany(2, 500);
+  assert.equal(redriven.length, 2);
+  assert.ok(redriven.every((job) => job.status === "queued" && job.availableAt === now + 500));
+  assert.deepEqual(store.stats(), {
+    queued: 2, running: 0, succeeded: 0, failed: 1, cancelled: 0, total: 3,
+  });
+  const event = store.listEvents(redriven[0].id).at(-1)!;
+  assert.equal(event.type, "redriven");
+  assert.equal(event.detail.bulk, true);
+  assert.ok(failedIds.includes(store.list("failed")[0].id));
+  store.close();
+});
+
+test("retention removes only eligible terminal jobs and cascades events", () => {
+  let now = 90_000;
+  const store = new JobStore(":memory:", () => now);
+  const succeeded = store.enqueue({ type: "old-success" });
+  store.claim("worker");
+  store.complete(succeeded.id, "worker");
+  const failed = store.enqueue({ type: "old-failure", maxAttempts: 1 });
+  store.claim("worker");
+  store.fail(failed.id, "worker", "keep for diagnosis");
+  const queued = store.enqueue({ type: "still-pending" });
+
+  now += 10_000;
+  const recent = store.enqueue({ type: "recent-success", priority: 10 });
+  store.claim("worker");
+  store.complete(recent.id, "worker");
+
+  const firstPurge = store.purgeTerminal(5_000);
+  assert.deepEqual(firstPurge.jobIds, [succeeded.id]);
+  assert.equal(store.get(succeeded.id), null);
+  assert.deepEqual(store.listEvents(succeeded.id), []);
+  assert.equal(store.get(failed.id)?.status, "failed");
+  assert.equal(store.get(queued.id)?.status, "queued");
+  assert.equal(store.get(recent.id)?.status, "succeeded");
+
+  const includingFailed = store.purgeTerminal(0, 10, true);
+  assert.ok(includingFailed.jobIds.includes(failed.id));
+  assert.ok(includingFailed.jobIds.includes(recent.id));
+  assert.equal(store.get(queued.id)?.status, "queued");
+  store.close();
+});

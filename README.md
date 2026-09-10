@@ -15,6 +15,7 @@ protocol, and HTTP control plane are implemented in this repository.
 - Delayed jobs and configurable attempt budgets
 - Per-job exponential retry backoff with caps and jitter
 - Persistent pause/resume controls for maintenance windows
+- Bounded bulk dead-letter redrive and terminal-job retention cleanup
 - Atomic worker leases that prevent double claims
 - Automatic recovery after worker crashes
 - Renewable leases for handlers that outlive their initial claim
@@ -93,6 +94,8 @@ Set `RELAYQ_API_KEY` on both the API and workers to protect mutations.
 | `GET` | `/admin/state` | Inspect persistent pause state |
 | `POST` | `/admin/pause` | Stop dispatching new work |
 | `POST` | `/admin/resume` | Resume dispatch |
+| `POST` | `/admin/redrive` | Redrive a bounded batch of failed jobs |
+| `POST` | `/admin/purge` | Remove eligible terminal jobs by age |
 
 See [the architecture notes](docs/ARCHITECTURE.md) for the delivery guarantees,
 concurrency strategy, tradeoffs, and trust boundaries. The
@@ -101,10 +104,12 @@ reproducible worker-crash demonstration. [Retry policy documentation](docs/RETRY
 explains the backoff formula, jitter, overrides, and migration behavior.
 The [security model](docs/SECURITY.md) documents authentication guarantees and
 the remaining requirements for an internet-facing deployment.
+The [administration guide](docs/ADMINISTRATION.md) provides safe redrive,
+retention, and maintenance procedures.
 
 ## Roadmap
 
-- Bulk dead-letter redrive and retention policies
+- Scheduled retention and dead-letter policy automation
 - Dashboard filtering and per-job timeline views
 - PostgreSQL storage adapter and multi-node control plane
 - Scoped worker identities, rate limiting, and administrative audit events
@@ -117,7 +122,8 @@ transactional event history, a live control-room dashboard, container packaging,
 and repeatable performance and failure demonstrations. Retry scheduling now uses
 per-job capped exponential backoff with jitter. Persistent maintenance controls,
 optional mutation authentication, and defensive request handling are also
-operational. The next milestone is queue retention and bulk administration.
+operational. Bounded bulk redrive and retention cleanup complete the core
+operator workflow. The next milestone is final demo polish before project two.
 
 ## License
 

@@ -111,6 +111,19 @@ export function createRelayServer(store: JobStore, options: ServerOptions = {}):
       if (method === "POST" && url.pathname === "/admin/resume") {
         return json(response, 200, store.resume());
       }
+      if (method === "POST" && url.pathname === "/admin/redrive") {
+        const body = await readJson(request);
+        const limit = body.limit === undefined ? 100 : Number(body.limit);
+        const delayMs = body.delayMs === undefined ? 0 : Number(body.delayMs);
+        const jobs = store.requeueFailedMany(limit, delayMs);
+        return json(response, 200, { redriven: jobs.length, jobs });
+      }
+      if (method === "POST" && url.pathname === "/admin/purge") {
+        const body = await readJson(request);
+        const olderThanMs = body.olderThanMs === undefined ? 604_800_000 : Number(body.olderThanMs);
+        const limit = body.limit === undefined ? 1_000 : Number(body.limit);
+        return json(response, 200, store.purgeTerminal(olderThanMs, limit, body.includeFailed === true));
+      }
       if (method === "GET" && url.pathname === "/events") {
         const jobId = url.searchParams.get("jobId") ?? undefined;
         const after = Number(url.searchParams.get("after") ?? 0);

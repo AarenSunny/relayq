@@ -178,3 +178,37 @@ test("operators can pause and resume claims over HTTP", async () => {
   }).then((response) => response.json()) as { id: string };
   assert.equal(claim.id, created.id);
 });
+
+test("bulk administration redrives and purges bounded batches", async () => {
+  for (let index = 0; index < 2; index += 1) {
+    const created = await fetch(`${baseUrl}/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: `bulk-failure-${index}`, priority: 300 + index, maxAttempts: 1 }),
+    }).then((response) => response.json()) as { id: string };
+    const workerId = `bulk-worker-${index}`;
+    await fetch(`${baseUrl}/workers/${workerId}/claim`, {
+      method: "POST", headers: { "content-type": "application/json" }, body: "{}",
+    });
+    await fetch(`${baseUrl}/jobs/${created.id}/fail`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workerId, error: "bulk test" }),
+    });
+  }
+
+  const redrive = await fetch(`${baseUrl}/admin/redrive`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ limit: 1, delayMs: 250 }),
+  }).then((response) => response.json()) as { redriven: number };
+  assert.equal(redrive.redriven, 1);
+
+  const purge = await fetch(`${baseUrl}/admin/purge`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ olderThanMs: 0, limit: 100 }),
+  }).then((response) => response.json()) as { deleted: number; jobIds: string[] };
+  assert.ok(purge.deleted >= 1);
+  assert.equal(purge.deleted, purge.jobIds.length);
+});
