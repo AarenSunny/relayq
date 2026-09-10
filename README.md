@@ -1,5 +1,7 @@
 # RelayQ
 
+[![CI](https://github.com/AarenSunny/relayq/actions/workflows/ci.yml/badge.svg)](https://github.com/AarenSunny/relayq/actions/workflows/ci.yml)
+
 RelayQ is a durable distributed job-processing platform built from first
 principles with Node.js and SQLite. Producers submit jobs over HTTP, workers
 lease them, and the queue safely retries work after explicit failures or worker
@@ -29,6 +31,7 @@ protocol, and HTTP control plane are implemented in this repository.
 - Non-root container image and scalable multi-worker Compose demo
 - Reproducible durability benchmark and deterministic crash demonstration
 - Optional bearer-token protection and hardened HTTP request handling
+- Dependency-free producer and operator CLI
 
 ## Quick start
 
@@ -69,6 +72,14 @@ curl -s http://localhost:8080/jobs
 curl -s http://localhost:8080/stats
 ```
 
+The same workflows are available through the CLI:
+
+```bash
+npm run cli -- submit sum '[20,22]' --priority 5
+npm run cli -- jobs --status succeeded
+npm run cli -- stats
+```
+
 The default database is `relayq.db`. Set `RELAYQ_DB`, `PORT`, `RELAYQ_URL`,
 `WORKER_ID`, `POLL_MS`, or `LEASE_MS` to change runtime settings.
 Set `RELAYQ_API_KEY` on both the API and workers to protect mutations.
@@ -106,6 +117,8 @@ The [security model](docs/SECURITY.md) documents authentication guarantees and
 the remaining requirements for an internet-facing deployment.
 The [administration guide](docs/ADMINISTRATION.md) provides safe redrive,
 retention, and maintenance procedures.
+For a concise project presentation, follow the
+[three-minute portfolio demo](docs/DEMO.md).
 
 ## Roadmap
 
@@ -117,13 +130,13 @@ retention, and maintenance procedures.
 
 ## Status
 
-The durable queue MVP now includes renewable leases, failed-job recovery,
+The portfolio release includes renewable leases, failed-job recovery,
 transactional event history, a live control-room dashboard, container packaging,
 and repeatable performance and failure demonstrations. Retry scheduling now uses
 per-job capped exponential backoff with jitter. Persistent maintenance controls,
 optional mutation authentication, and defensive request handling are also
-operational. Bounded bulk redrive and retention cleanup complete the core
-operator workflow. The next milestone is final demo polish before project two.
+operational. Bounded bulk redrive, retention cleanup, and the operator CLI
+complete the planned core workflow; remaining items are documented extensions.
 
 ## License
 
