@@ -19,4 +19,5 @@ jobs:
       - run: npm ci --ignore-scripts
       - run: npm test
       - run: npm run benchmark -- --jobs 100 --workers 4 --json
+      - run: npm run reliability -- --jobs 50 --workers 4 --crash-every 10 --json
       - run: docker build -t relayq:ci .

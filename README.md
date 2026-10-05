@@ -29,7 +29,8 @@ protocol, and HTTP control plane are implemented in this repository.
 - Example worker with `sum`, `uppercase`, and `sleep` task handlers
 - Unit and end-to-end HTTP tests with no third-party runtime dependencies
 - Non-root container image and scalable multi-worker Compose demo
-- Reproducible durability benchmark and deterministic crash demonstration
+- Reproducible durability benchmark, crash demo, and machine-readable
+  reliability experiment
 - Optional bearer-token protection and hardened HTTP request handling
 - Dependency-free producer and operator CLI
 
@@ -111,7 +112,7 @@ Set `RELAYQ_API_KEY` on both the API and workers to protect mutations.
 See [the architecture notes](docs/ARCHITECTURE.md) for the delivery guarantees,
 concurrency strategy, tradeoffs, and trust boundaries. The
 [operations guide](docs/OPERATIONS.md) covers containers, benchmarking, and a
-reproducible worker-crash demonstration. [Retry policy documentation](docs/RETRY_POLICY.md)
+reproducible worker-crash experiment. [Retry policy documentation](docs/RETRY_POLICY.md)
 explains the backoff formula, jitter, overrides, and migration behavior.
 The [security model](docs/SECURITY.md) documents authentication guarantees and
 the remaining requirements for an internet-facing deployment.

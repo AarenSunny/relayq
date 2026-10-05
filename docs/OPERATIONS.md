@@ -49,6 +49,30 @@ past the lease deadline, and shows the same job being recovered and completed
 by a replacement. Its event table makes the at-least-once state transitions
 easy to explain in an interview or screen recording.
 
+## Controlled reliability experiment
+
+Run a repeatable batch in which every tenth logical worker disappears after
+claiming a job. The experiment advances a controlled clock past the lease,
+reclaims the abandoned work, and verifies that both the stale worker and a
+duplicate acknowledgement are rejected.
+
+```bash
+npm run reliability
+npm run reliability -- --jobs 200 --workers 8 --crash-every 10 --json
+```
+
+The JSON report captures simulated crashes, recovered leases, retry attempts,
+rejection counts, event totals, final queue state, and wall-clock throughput.
+It is intentionally a state-machine experiment: logical workers execute
+sequentially in one process, the clock jump is deterministic, and it does not
+model network partitions or multi-host availability. Use the Docker demo for
+separate worker processes and treat the report as a reproducible correctness
+baseline rather than a distributed throughput claim.
+
+Runs are capped at 1,000 jobs and cannot declare more logical workers than
+jobs. Each run uses an isolated temporary database and removes it on exit, so
+the experiment cannot mutate the development or demo queue.
+
 ## Operational notes
 
 - Back up the `/data` volume rather than copying an open database file.
@@ -58,4 +82,6 @@ easy to explain in an interview or screen recording.
 - Redrive and retention calls are bounded. Follow the
   [administration runbook](ADMINISTRATION.md) for safe maintenance sequences.
 - Scale only the stateless `worker` service in the SQLite configuration.
-- The API is unauthenticated and intended for a trusted demo environment.
+- Bearer authentication is optional; without `RELAYQ_API_KEY`, run only in a
+  trusted demo environment. TLS, scoped identities, and rate limiting remain
+  deployment responsibilities.

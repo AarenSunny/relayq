@@ -13,6 +13,7 @@
     "cli": "node src/cli.ts",
     "benchmark": "node tools/benchmark.ts",
     "failure-demo": "node tools/failure-demo.ts",
+    "reliability": "node tools/reliability-experiment.ts",
     "test": "node --test",
     "check": "node --run test"
   }
