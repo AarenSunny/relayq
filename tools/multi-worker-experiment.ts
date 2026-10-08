@@ -38,6 +38,13 @@ export interface MultiWorkerReport {
 
 const workerEntry = fileURLToPath(new URL("../src/worker.ts", import.meta.url));
 
+export const DEFAULT_MULTI_WORKER_OPTIONS: MultiWorkerOptions = {
+  jobs: 100,
+  workers: 4,
+  taskMs: 25,
+  timeoutMs: 30_000,
+};
+
 function positiveInteger(name: string, value: number, maximum: number): void {
   if (!Number.isInteger(value) || value < 1 || value > maximum) {
     throw new Error(`${name} must be an integer between 1 and ${maximum}`);
@@ -200,3 +207,41 @@ export async function runMultiWorkerExperiment(
     rmSync(directory, { recursive: true, force: true });
   }
 }
+
+function integerArg(name: string, fallback: number): number {
+  const index = process.argv.indexOf(name);
+  const value = index === -1 ? fallback : Number(process.argv[index + 1]);
+  if (!Number.isInteger(value)) throw new Error(`${name} must be an integer`);
+  return value;
+}
+
+async function main(): Promise<void> {
+  const report = await runMultiWorkerExperiment({
+    jobs: integerArg("--jobs", DEFAULT_MULTI_WORKER_OPTIONS.jobs),
+    workers: integerArg("--workers", DEFAULT_MULTI_WORKER_OPTIONS.workers),
+    taskMs: integerArg("--task-ms", DEFAULT_MULTI_WORKER_OPTIONS.taskMs),
+    timeoutMs: integerArg("--timeout-ms", DEFAULT_MULTI_WORKER_OPTIONS.timeoutMs),
+  });
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+  console.log("RelayQ multi-process worker experiment");
+  console.table({
+    jobs: report.jobs,
+    workerProcesses: report.workerProcesses,
+    activeWorkers: report.activeWorkers,
+    taskMs: report.taskMs,
+    jobsPerSecond: report.jobsPerSecond,
+    elapsedSeconds: report.elapsedSeconds,
+  });
+  console.log("Completions by worker:");
+  console.table(report.completionsByWorker);
+  console.log("Limitations:");
+  for (const limitation of report.limitations) console.log(`- ${limitation}`);
+}
+
+const isEntryPoint = process.argv[1]
+  ? resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  : false;
+if (isEntryPoint) await main();
