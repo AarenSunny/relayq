@@ -23,6 +23,35 @@ The container runs as an unprivileged user, exposes an HTTP health check, and
 persists only the control plane's SQLite database. Workers are stateless and
 communicate exclusively through the HTTP lease protocol.
 
+## Measured multi-process load
+
+Run the bounded experiment to start one local API and independent Node.js
+worker processes, fill the queue with timed jobs, and verify that every worker
+participates and every job reaches `succeeded` exactly once:
+
+```bash
+npm run multi-worker
+npm run multi-worker -- --jobs 200 --workers 8 --task-ms 25 --json
+```
+
+The JSON report includes wall-clock throughput, completion counts per worker,
+final queue statistics, explicit invariants, and limitations. Runs use an
+isolated temporary database, accept at most 500 jobs and 32 workers, and remove
+their state on exit.
+
+Reference run on October 8, 2026: Node.js 24.16.0 on an Apple M4 running macOS
+27.0 completed 100 25-ms jobs with four active worker processes in 0.778
+seconds (128.5 jobs/second), with 25 completions per worker. This is a local
+coordination measurement, not a multi-host scalability claim. One API process
+owns SQLite, traffic stays on loopback, and the timed handler does not model
+CPU-bound execution. Compare results only with the same inputs and environment.
+
+The design deliberately targets a cloud/tools role signal—process orchestration,
+HTTP worker coordination, and measurable load—while fitting RelayQ's existing
+lease protocol. Its smallest credible scope is one API plus real worker
+processes, its evidence is the machine-readable report and invariants, and its
+honest boundary is single-host SQLite rather than distributed storage.
+
 ## Local durability benchmark
 
 The benchmark exercises the real SQLite state machine: each job is inserted,
