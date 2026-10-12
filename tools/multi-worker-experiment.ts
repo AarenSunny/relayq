@@ -1,7 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
-import type { Server } from "node:http";
-import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -10,6 +8,12 @@ import { setTimeout as delay } from "node:timers/promises";
 import { createRelayServer } from "../src/server.ts";
 import { JobStore } from "../src/store.ts";
 import type { JobEvent, QueueStats } from "../src/types.ts";
+import {
+  closeHttpServer,
+  listenOnLoopback,
+  startWorkerProcess,
+  stopWorkerProcess,
+} from "./process-harness.ts";
 
 export interface MultiWorkerOptions {
   jobs: number;
@@ -36,8 +40,6 @@ export interface MultiWorkerReport {
   limitations: string[];
 }
 
-const workerEntry = fileURLToPath(new URL("../src/worker.ts", import.meta.url));
-
 export const DEFAULT_MULTI_WORKER_OPTIONS: MultiWorkerOptions = {
   jobs: 100,
   workers: 4,
@@ -56,57 +58,6 @@ function validateOptions(options: MultiWorkerOptions): void {
   positiveInteger("workers", options.workers, Math.min(options.jobs, 32));
   positiveInteger("taskMs", options.taskMs, 5_000);
   positiveInteger("timeoutMs", options.timeoutMs, 120_000);
-}
-
-async function listen(server: Server): Promise<string> {
-  await new Promise<void>((resolveListen, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", resolveListen);
-  });
-  const address = server.address() as AddressInfo;
-  return `http://127.0.0.1:${address.port}`;
-}
-
-function startWorker(baseUrl: string, workerId: string): {
-  process: ChildProcess;
-  ready: Promise<void>;
-} {
-  const worker = spawn(process.execPath, [workerEntry], {
-    cwd: resolve(fileURLToPath(new URL("..", import.meta.url))),
-    env: {
-      ...process.env,
-      RELAYQ_URL: baseUrl,
-      WORKER_ID: workerId,
-      POLL_MS: "10",
-      LEASE_MS: "5000",
-    },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  worker.stdout?.setEncoding("utf8");
-  const ready = new Promise<void>((resolveReady, rejectReady) => {
-    worker.once("error", rejectReady);
-    worker.stdout?.once("data", () => resolveReady());
-  });
-  return { process: worker, ready };
-}
-
-async function stopWorker(worker: ChildProcess): Promise<void> {
-  if (worker.exitCode !== null || worker.signalCode !== null) return;
-  const exited = new Promise<void>((resolveExit) => worker.once("exit", () => resolveExit()));
-  worker.kill("SIGTERM");
-  await Promise.race([
-    exited,
-    delay(2_000, undefined, { ref: false }).then(() => {
-      if (worker.exitCode === null && worker.signalCode === null) worker.kill("SIGKILL");
-    }),
-  ]);
-}
-
-async function closeServer(server: Server): Promise<void> {
-  server.closeAllConnections();
-  await new Promise<void>((resolveClose, reject) => {
-    server.close((error) => error ? reject(error) : resolveClose());
-  });
 }
 
 function readAllEvents(store: JobStore): JobEvent[] {
@@ -128,16 +79,18 @@ export async function runMultiWorkerExperiment(
   const store = new JobStore(join(directory, "queue.db"));
   const server = createRelayServer(store);
   const workers: ChildProcess[] = [];
-  const workerErrors: string[] = [];
+  const workerErrors: string[][] = [];
 
   try {
-    const baseUrl = await listen(server);
+    const baseUrl = await listenOnLoopback(server);
     const readyWorkers: Promise<void>[] = [];
     for (let index = 0; index < options.workers; index += 1) {
-      const startedWorker = startWorker(baseUrl, `experiment-worker-${index + 1}`);
+      const startedWorker = startWorkerProcess({
+        baseUrl,
+        workerId: `experiment-worker-${index + 1}`,
+      });
       const worker = startedWorker.process;
-      worker.stderr?.setEncoding("utf8");
-      worker.stderr?.on("data", (chunk: string) => workerErrors.push(chunk.trim()));
+      workerErrors.push(startedWorker.errors);
       workers.push(worker);
       readyWorkers.push(startedWorker.ready);
     }
@@ -154,7 +107,9 @@ export async function runMultiWorkerExperiment(
     let finalStats = store.stats();
     while (finalStats.succeeded < options.jobs && performance.now() < deadline) {
       const exited = workers.find((worker) => worker.exitCode !== null || worker.signalCode !== null);
-      if (exited) throw new Error(`worker exited before the queue drained: ${workerErrors.join("; ")}`);
+      if (exited) {
+        throw new Error(`worker exited before the queue drained: ${workerErrors.flat().join("; ")}`);
+      }
       await delay(10);
       finalStats = store.stats();
     }
@@ -201,8 +156,8 @@ export async function runMultiWorkerExperiment(
       ],
     };
   } finally {
-    await Promise.all(workers.map(stopWorker));
-    if (server.listening) await closeServer(server);
+    await Promise.all(workers.map((worker) => stopWorkerProcess(worker)));
+    if (server.listening) await closeHttpServer(server);
     store.close();
     rmSync(directory, { recursive: true, force: true });
   }
