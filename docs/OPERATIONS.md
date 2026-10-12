@@ -78,6 +78,33 @@ past the lease deadline, and shows the same job being recovered and completed
 by a replacement. Its event table makes the at-least-once state transitions
 easy to explain in an interview or screen recording.
 
+## Worker-process crash experiment
+
+Run a real process failure in an isolated environment:
+
+```bash
+npm run process-crash
+npm run process-crash -- --lease-ms 1000 --task-ms 250 --json
+```
+
+The experiment starts an API and worker, waits until the worker owns a timed
+job, kills that process with `SIGKILL`, and starts a replacement. The report
+verifies the expired lease, two claim attempts, one recorded completion, the
+replacement's identity, and an empty final queue.
+
+Reference run on October 11, 2026: Node.js 24.16.0 on an Apple M4 running macOS
+27.0 recovered and completed the job 1,256 ms after the crash with a 1,000-ms
+lease and 250-ms task. This is evidence of the HTTP lease protocol surviving a
+worker-process failure, not evidence of multi-host availability. The API and
+SQLite process stay healthy, traffic uses loopback, and the side-effect-free
+probe cannot prove exactly-once external effects.
+
+The role signal is failure investigation and recovery automation for a
+cloud/tools system. The change fits RelayQ's existing lease state machine; its
+smallest credible scope is one killed owner and one replacement; its evidence
+is the event sequence, recovery time, and checked invariants; and its honest
+boundary is one host with a healthy control plane.
+
 ## Controlled reliability experiment
 
 Run a repeatable batch in which every tenth logical worker disappears after

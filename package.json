@@ -13,6 +13,7 @@
     "cli": "node src/cli.ts",
     "benchmark": "node tools/benchmark.ts",
     "multi-worker": "node tools/multi-worker-experiment.ts",
+    "process-crash": "node tools/process-crash-experiment.ts",
     "failure-demo": "node tools/failure-demo.ts",
     "reliability": "node tools/reliability-experiment.ts",
     "test": "node --test",

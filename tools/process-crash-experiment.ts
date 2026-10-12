@@ -1,8 +1,9 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { setTimeout as delay } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { createRelayServer } from "../src/server.ts";
 import { JobStore } from "../src/store.ts";
 import type { JobEvent, QueueStats } from "../src/types.ts";
@@ -168,3 +169,38 @@ export async function runProcessCrashExperiment(
     rmSync(directory, { recursive: true, force: true });
   }
 }
+
+function integerArg(name: string, fallback: number): number {
+  const index = process.argv.indexOf(name);
+  const value = index === -1 ? fallback : Number(process.argv[index + 1]);
+  if (!Number.isInteger(value)) throw new Error(`${name} must be an integer`);
+  return value;
+}
+
+async function main(): Promise<void> {
+  const report = await runProcessCrashExperiment({
+    leaseMs: integerArg("--lease-ms", DEFAULT_PROCESS_CRASH_OPTIONS.leaseMs),
+    taskMs: integerArg("--task-ms", DEFAULT_PROCESS_CRASH_OPTIONS.taskMs),
+    timeoutMs: integerArg("--timeout-ms", DEFAULT_PROCESS_CRASH_OPTIONS.timeoutMs),
+  });
+  if (process.argv.includes("--json")) {
+    console.log(JSON.stringify(report, null, 2));
+    return;
+  }
+  console.log("RelayQ worker-process crash experiment");
+  console.table({
+    leaseMs: report.leaseMs,
+    taskMs: report.taskMs,
+    recoveryAfterCrashMs: report.recoveryAfterCrashMs,
+    crashedWorkerSignal: report.crashedWorkerSignal,
+    attempts: report.attempts,
+  });
+  console.log(`Event sequence: ${report.eventSequence.join(" -> ")}`);
+  console.log("Limitations:");
+  for (const limitation of report.limitations) console.log(`- ${limitation}`);
+}
+
+const isEntryPoint = process.argv[1]
+  ? resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+  : false;
+if (isEntryPoint) await main();

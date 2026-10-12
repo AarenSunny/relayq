@@ -48,17 +48,20 @@ work during maintenance.
 
 ```bash
 npm run failure-demo
+npm run process-crash -- --json
 npm run reliability -- --jobs 100 --workers 8 --crash-every 10
 npm run multi-worker -- --jobs 100 --workers 4 --task-ms 25
 npm run benchmark -- --jobs 1000 --workers 8
 ```
 
 The failure demo shows one worker disappearing and another completing the same
-job ID after lease expiry. The reliability experiment repeats that failure,
-checks ownership and duplicate-completion guards, and reports its invariants.
-The multi-worker experiment launches separate processes and reports their work
-distribution; the durability benchmark isolates real SQLite writes for job
-creation, claims, results, and event history.
+job ID after lease expiry. The process-crash experiment kills a real worker and
+records its replacement's recovery time and event sequence. The controlled
+reliability experiment repeats the state-machine failure, checks ownership and
+duplicate-completion guards, and reports its invariants. The multi-worker
+experiment launches separate processes and reports their work distribution;
+the durability benchmark isolates real SQLite writes for job creation, claims,
+results, and event history.
 
 ## Interview talking points
 
