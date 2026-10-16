@@ -103,6 +103,7 @@ Set `RELAYQ_API_KEY` on both the API and workers to protect mutations.
 | `GET` | `/events/stream` | Subscribe to live events with SSE |
 | `GET` | `/stats` | Return counts by state |
 | `GET` | `/health` | Liveness check |
+| `GET` | `/ready` | SQLite-backed readiness check |
 | `GET` | `/admin/state` | Inspect persistent pause state |
 | `POST` | `/admin/pause` | Stop dispatching new work |
 | `POST` | `/admin/resume` | Resume dispatch |

@@ -2,6 +2,13 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { JobStore } from "../src/store.ts";
 
+test("readiness reflects SQLite availability", () => {
+  const store = new JobStore(":memory:");
+  assert.equal(store.isReady(), true);
+  store.close();
+  assert.equal(store.isReady(), false);
+});
+
 test("claims by priority and completes with a result", () => {
   let now = 1_000;
   const store = new JobStore(":memory:", () => now);

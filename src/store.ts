@@ -72,6 +72,16 @@ export class JobStore {
     this.db.close();
   }
 
+  isReady(): boolean {
+    try {
+      const row = this.db.prepare("SELECT id FROM queue_control WHERE id = 1").get() as
+        { id: number } | undefined;
+      return row?.id === 1;
+    } catch {
+      return false;
+    }
+  }
+
   enqueue(input: NewJob): Job {
     if (!input.type?.trim()) throw new Error("job type is required");
     const priority = input.priority ?? 0;

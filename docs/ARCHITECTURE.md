@@ -73,6 +73,11 @@ the dashboard and health probes. TLS, tenant isolation, scoped identities, rate
 limiting, and administrative audit logging are still required before an
 internet-facing deployment. See [the security model](SECURITY.md).
 
+`/health` reports only that the HTTP process is alive. `/ready` performs a
+side-effect-free read of the persistent queue-control row and returns `503` if
+SQLite is unavailable. It does not run a full integrity check or prove that
+external worker dependencies are reachable.
+
 ## Administrative control
 
 Pause state lives in SQLite rather than process memory, so it survives restarts

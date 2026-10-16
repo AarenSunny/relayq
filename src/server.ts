@@ -98,6 +98,12 @@ export function createRelayServer(store: JobStore, options: ServerOptions = {}):
       if (method === "GET" && url.pathname === "/health") {
         return json(response, 200, { status: "ok" });
       }
+      if (method === "GET" && url.pathname === "/ready") {
+        const ready = store.isReady();
+        return json(response, ready ? 200 : 503, {
+          status: ready ? "ready" : "unavailable",
+        });
+      }
       if (method === "GET" && url.pathname === "/stats") {
         return json(response, 200, store.stats());
       }

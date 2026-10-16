@@ -19,9 +19,10 @@ Open <http://localhost:8080>, submit several `sum`, `uppercase`, or `sleep`
 jobs, and watch separate worker IDs claim work in the live activity feed. Queue
 state is stored in the `relayq-data` volume and survives container replacement.
 
-The container runs as an unprivileged user, exposes an HTTP health check, and
-persists only the control plane's SQLite database. Workers are stateless and
-communicate exclusively through the HTTP lease protocol.
+The container runs as an unprivileged user, exposes separate liveness and
+SQLite-backed readiness checks, and persists only the control plane's SQLite
+database. Workers are stateless and communicate exclusively through the HTTP
+lease protocol.
 
 ## Measured multi-process load
 
@@ -132,7 +133,11 @@ the experiment cannot mutate the development or demo queue.
 ## Operational notes
 
 - Back up the `/data` volume rather than copying an open database file.
-- A readiness probe should use `/health`; queue depth is available at `/stats`.
+- Use `/health` for liveness and `/ready` for readiness. The readiness check is
+  a lightweight read of RelayQ's control row; it returns `503` when SQLite is
+  unavailable. The image's built-in Docker health check remains a liveness
+  probe; configure `/ready` as the traffic readiness gate in an orchestrator.
+  Queue depth is available separately at `/stats`.
 - Pause dispatch during maintenance with `POST /admin/pause`, then restore it
   with `POST /admin/resume`; current leases can still finish while paused.
 - Redrive and retention calls are bounded. Follow the

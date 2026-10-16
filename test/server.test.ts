@@ -67,6 +67,35 @@ test("invalid jobs return a useful client error", async () => {
   assert.match((await response.json() as { error: string }).error, /type is required/);
 });
 
+test("readiness distinguishes the HTTP process from SQLite availability", async () => {
+  const readinessStore = new JobStore(":memory:");
+  const readinessServer = createRelayServer(readinessStore);
+  await new Promise<void>((resolve) => readinessServer.listen(0, "127.0.0.1", resolve));
+  const address = readinessServer.address() as AddressInfo;
+  const url = `http://127.0.0.1:${address.port}`;
+  let storeClosed = false;
+  try {
+    const ready = await fetch(`${url}/ready`);
+    assert.equal(ready.status, 200);
+    assert.deepEqual(await ready.json(), { status: "ready" });
+
+    readinessStore.close();
+    storeClosed = true;
+    const unavailable = await fetch(`${url}/ready`);
+    assert.equal(unavailable.status, 503);
+    assert.deepEqual(await unavailable.json(), { status: "unavailable" });
+
+    const live = await fetch(`${url}/health`);
+    assert.equal(live.status, 200);
+    assert.deepEqual(await live.json(), { status: "ok" });
+  } finally {
+    readinessServer.closeAllConnections();
+    await new Promise<void>((resolve, reject) =>
+      readinessServer.close((error) => error ? reject(error) : resolve()));
+    if (!storeClosed) readinessStore.close();
+  }
+});
+
 test("workers renew leases and operators recover dead-lettered jobs", async () => {
   const created = await fetch(`${baseUrl}/jobs`, {
     method: "POST",
