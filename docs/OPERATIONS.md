@@ -145,6 +145,10 @@ the experiment cannot mutate the development or demo queue.
   Queue depth is available separately at `/stats`.
 - Pause dispatch during maintenance with `POST /admin/pause`, then restore it
   with `POST /admin/resume`; current leases can still finish while paused.
+- Workers log completion only after the API accepts the lease-owned transition.
+  A rejected completion is routed through failure acknowledgement; if that is
+  also rejected, the worker reports the control-plane error rather than a false
+  success.
 - Redrive and retention calls are bounded. Follow the
   [administration runbook](ADMINISTRATION.md) for safe maintenance sequences.
 - Scale only the stateless `worker` service in the SQLite configuration.

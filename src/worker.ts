@@ -35,6 +35,18 @@ async function request(path: string, init?: RequestInit): Promise<Response> {
   });
 }
 
+async function requireSuccess(response: Response, action: string): Promise<void> {
+  if (response.ok) return;
+  let detail = "";
+  try {
+    const body = await response.json() as { error?: unknown };
+    if (typeof body.error === "string") detail = `: ${body.error}`;
+  } catch {
+    // Status and action still identify non-JSON failures.
+  }
+  throw new Error(`${action} returned ${response.status}${detail}`);
+}
+
 async function run(): Promise<void> {
   console.log(`${workerId} polling ${baseUrl}`);
   while (true) {
@@ -63,16 +75,18 @@ async function run(): Promise<void> {
       try {
         if (!handler) throw new Error(`unknown job type: ${job.type}`);
         const result = await handler(job.payload);
-        await request(`/jobs/${job.id}/complete`, {
+        const completion = await request(`/jobs/${job.id}/complete`, {
           method: "POST", body: JSON.stringify({ workerId, result }),
         });
+        await requireSuccess(completion, `completion for ${job.id}`);
         console.log(`completed ${job.id} (${job.type})`);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        await request(`/jobs/${job.id}/fail`, {
+        const failure = await request(`/jobs/${job.id}/fail`, {
           method: "POST",
           body: JSON.stringify({ workerId, error: message }),
         });
+        await requireSuccess(failure, `failure acknowledgement for ${job.id}`);
         console.error(`failed ${job.id}: ${message}`);
       } finally {
         clearInterval(heartbeat);
