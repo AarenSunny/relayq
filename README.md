@@ -30,7 +30,7 @@ protocol, and HTTP control plane are implemented in this repository.
 - Unit and end-to-end HTTP tests with no third-party runtime dependencies
 - Non-root container image and scalable multi-worker Compose demo
 - Reproducible durability benchmark, killed-worker recovery, controlled recovery
-  experiment, and measured multi-process worker load
+  experiment, and measured multi-process worker throughput and latency
 - Optional bearer-token protection and hardened HTTP request handling
 - Dependency-free producer and operator CLI
 

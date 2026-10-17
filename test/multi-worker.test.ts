@@ -16,6 +16,10 @@ test("separate worker processes drain the queue exactly once", async () => {
   assert.deepEqual(report.finalStats, {
     queued: 0, running: 0, succeeded: 12, failed: 0, cancelled: 0, total: 12,
   });
+  assert.equal(report.enqueueToCompletionMs.samples, 12);
+  assert.ok(report.enqueueToCompletionMs.p50 >= 0);
+  assert.ok(report.enqueueToCompletionMs.p50 <= report.enqueueToCompletionMs.p95);
+  assert.ok(report.enqueueToCompletionMs.p95 <= report.enqueueToCompletionMs.max);
   assert.ok(Object.values(report.invariants).every(Boolean));
 });
 

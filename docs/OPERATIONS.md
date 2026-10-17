@@ -36,16 +36,21 @@ npm run multi-worker -- --jobs 200 --workers 8 --task-ms 25 --json
 ```
 
 The JSON report includes wall-clock throughput, completion counts per worker,
-final queue statistics, explicit invariants, and limitations. Runs use an
-isolated temporary database, accept at most 500 jobs and 32 workers, and remove
-their state on exit.
+enqueue-to-completion p50/p95/max latency, final queue statistics, explicit
+invariants, and limitations. Latency is derived from durable lifecycle-event
+timestamps, and the report verifies that every completion has a matching
+enqueue sample. Runs use an isolated temporary database, accept at most 500
+jobs and 32 workers, and remove their state on exit.
 
-Reference run on October 8, 2026: Node.js 24.16.0 on an Apple M4 running macOS
-27.0 completed 100 25-ms jobs with four active worker processes in 0.778
-seconds (128.5 jobs/second), with 25 completions per worker. This is a local
-coordination measurement, not a multi-host scalability claim. One API process
-owns SQLite, traffic stays on loopback, and the timed handler does not model
-CPU-bound execution. Compare results only with the same inputs and environment.
+Reference run on October 17, 2026: Node.js 24.16.0 on an Apple M4 running macOS
+27.0 completed 100 25-ms jobs with four active worker processes in 0.794
+seconds (126.0 jobs/second), with 25 completions per worker. Enqueue-to-
+completion latency was 408 ms at p50, 756 ms at p95, and 784 ms maximum across
+all 100 durable event pairs. This is a local coordination measurement, not a
+multi-host scalability claim. One API process owns SQLite, traffic stays on
+loopback, and the timed handler does not model CPU-bound execution. Latency uses
+millisecond wall-clock timestamps on that one host. Compare results only with
+the same inputs and environment.
 
 The design deliberately targets a cloud/tools role signal—process orchestration,
 HTTP worker coordination, and measurable load—while fitting RelayQ's existing

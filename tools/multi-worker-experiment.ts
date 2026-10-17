@@ -31,11 +31,18 @@ export interface MultiWorkerReport {
   taskMs: number;
   jobsPerSecond: number;
   elapsedSeconds: number;
+  enqueueToCompletionMs: {
+    samples: number;
+    p50: number;
+    p95: number;
+    max: number;
+  };
   finalStats: QueueStats;
   invariants: {
     allJobsSucceeded: boolean;
     everyWorkerParticipated: boolean;
     eachJobCompletedOnce: boolean;
+    everyCompletionMeasured: boolean;
   };
   limitations: string[];
 }
@@ -69,6 +76,17 @@ function readAllEvents(store: JobStore): JobEvent[] {
     if (batch.length < 1_000) return events;
     cursor = batch.at(-1)!.id;
   }
+}
+
+function summarizeDurations(values: number[]): MultiWorkerReport["enqueueToCompletionMs"] {
+  const sorted = values.toSorted((left, right) => left - right);
+  const percentile = (value: number) => sorted[Math.ceil((value / 100) * sorted.length) - 1];
+  return {
+    samples: sorted.length,
+    p50: percentile(50),
+    p95: percentile(95),
+    max: sorted.at(-1)!,
+  };
 }
 
 export async function runMultiWorkerExperiment(
@@ -120,9 +138,14 @@ export async function runMultiWorkerExperiment(
 
     const completionsByWorker: Record<string, number> = {};
     const events = readAllEvents(store);
+    const enqueuedAt = new Map<string, number>();
+    const completionLatencies: number[] = [];
     for (const event of events) {
+      if (event.type === "enqueued") enqueuedAt.set(event.jobId, event.createdAt);
       if (event.type === "completed" && event.workerId) {
         completionsByWorker[event.workerId] = (completionsByWorker[event.workerId] ?? 0) + 1;
+        const start = enqueuedAt.get(event.jobId);
+        if (start !== undefined) completionLatencies.push(event.createdAt - start);
       }
     }
     const activeWorkers = Object.keys(completionsByWorker).length;
@@ -131,6 +154,7 @@ export async function runMultiWorkerExperiment(
       allJobsSucceeded: finalStats.succeeded === options.jobs && finalStats.total === options.jobs,
       everyWorkerParticipated: activeWorkers === options.workers,
       eachJobCompletedOnce: completionCount === options.jobs,
+      everyCompletionMeasured: completionLatencies.length === options.jobs,
     };
     if (Object.values(invariants).some((value) => !value)) {
       throw new Error(`multi-worker invariant failed: ${JSON.stringify(invariants)}`);
@@ -146,12 +170,14 @@ export async function runMultiWorkerExperiment(
       taskMs: options.taskMs,
       jobsPerSecond: Number((options.jobs / elapsedSeconds).toFixed(1)),
       elapsedSeconds: Number(elapsedSeconds.toFixed(3)),
+      enqueueToCompletionMs: summarizeDurations(completionLatencies),
       finalStats,
       invariants,
       limitations: [
         "Workers are separate Node.js processes, but one API process owns the SQLite database.",
         "Traffic stays on the local loopback interface and does not model network faults.",
         "The sleep handler measures queue coordination rather than CPU-bound execution.",
+        "Latency uses millisecond wall-clock event timestamps from one host.",
         "Throughput depends on the host and should only be compared under matching conditions.",
       ],
     };
@@ -189,6 +215,9 @@ async function main(): Promise<void> {
     taskMs: report.taskMs,
     jobsPerSecond: report.jobsPerSecond,
     elapsedSeconds: report.elapsedSeconds,
+    completionP50Ms: report.enqueueToCompletionMs.p50,
+    completionP95Ms: report.enqueueToCompletionMs.p95,
+    completionMaxMs: report.enqueueToCompletionMs.max,
   });
   console.log("Completions by worker:");
   console.table(report.completionsByWorker);
