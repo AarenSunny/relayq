@@ -149,6 +149,9 @@ the experiment cannot mutate the development or demo queue.
   A rejected completion is routed through failure acknowledgement; if that is
   also rejected, the worker reports the control-plane error rather than a false
   success.
+- Workers request renewal at roughly one-third of the configured lease, including
+  the minimum one-second lease. Renewal timers are best effort: event-loop stalls
+  or network delays can still expire a lease, so handlers remain idempotent.
 - Redrive and retention calls are bounded. Follow the
   [administration runbook](ADMINISTRATION.md) for safe maintenance sequences.
 - Scale only the stateless `worker` service in the SQLite configuration.

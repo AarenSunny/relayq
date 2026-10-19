@@ -5,6 +5,7 @@ const workerId = process.env.WORKER_ID ?? `worker-${process.env.HOSTNAME ?? proc
 const pollMs = Number(process.env.POLL_MS ?? 500);
 const leaseMs = Number(process.env.LEASE_MS ?? 30_000);
 const apiKey = process.env.RELAYQ_API_KEY;
+const heartbeatIntervalMs = Math.max(1, Math.floor(leaseMs / 3));
 
 const handlers: Record<string, (payload: unknown) => Promise<unknown>> = {
   sum: async (payload) => {
@@ -70,7 +71,7 @@ async function run(): Promise<void> {
         } catch (error) {
           console.error(`lease renewal for ${job.id} failed: ${error}`);
         }
-      }, Math.max(1_000, Math.floor(leaseMs / 3)));
+      }, heartbeatIntervalMs);
       heartbeat.unref();
       try {
         if (!handler) throw new Error(`unknown job type: ${job.type}`);
