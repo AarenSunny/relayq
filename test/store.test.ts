@@ -66,8 +66,41 @@ test("only the lease owner can complete a job", () => {
   const store = new JobStore(":memory:");
   const job = store.enqueue({ type: "sum" });
   store.claim("worker-a");
-  assert.throws(() => store.complete(job.id, "worker-b"), /not running for this worker/);
+  assert.throws(
+    () => store.complete(job.id, "worker-b"),
+    /lease is missing, expired, or owned by another worker/,
+  );
   assert.equal(store.get(job.id)?.status, "running");
+  store.close();
+});
+
+test("expired workers cannot complete or fail jobs before lease recovery", () => {
+  let now = 15_000;
+  const store = new JobStore(":memory:", () => now);
+  const completed = store.enqueue({ type: "late-completion", maxAttempts: 2 });
+  store.claim("worker-a", 1_000);
+
+  now += 1_001;
+  assert.throws(
+    () => store.complete(completed.id, "worker-a", "stale result"),
+    /lease is missing, expired, or owned by another worker/,
+  );
+  assert.equal(store.get(completed.id)?.status, "running");
+  assert.equal(store.claim("worker-b", 1_000)?.id, completed.id);
+  assert.equal(store.complete(completed.id, "worker-b", "fresh result").result, "fresh result");
+
+  const failed = store.enqueue({ type: "late-failure", maxAttempts: 2 });
+  store.claim("worker-a", 1_000);
+  now += 1_001;
+  assert.throws(
+    () => store.fail(failed.id, "worker-a", "stale failure"),
+    /lease is missing, expired, or owned by another worker/,
+  );
+  assert.equal(store.claim("worker-b", 1_000)?.id, failed.id);
+  assert.equal(store.fail(failed.id, "worker-b", "fresh failure").status, "failed");
+  assert.deepEqual(store.listEvents(failed.id).map((event) => event.type), [
+    "enqueued", "claimed", "lease_expired", "claimed", "dead_lettered",
+  ]);
   store.close();
 });
 

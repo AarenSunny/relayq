@@ -101,7 +101,9 @@ export function runReliabilityExperiment(options: ReliabilityOptions): Reliabili
       try {
         store.complete(recovered.id, staleOwner, { shouldNotBeAccepted: true });
       } catch (error) {
-        if (!(error instanceof Error) || !/not running for this worker/.test(error.message)) throw error;
+        if (!(error instanceof Error) || !/lease is missing, expired, or owned/.test(error.message)) {
+          throw error;
+        }
         staleCompletionRejections += 1;
       }
 
@@ -109,7 +111,9 @@ export function runReliabilityExperiment(options: ReliabilityOptions): Reliabili
       try {
         store.complete(recovered.id, replacementId, { shouldNotBeAccepted: true });
       } catch (error) {
-        if (!(error instanceof Error) || !/not running for this worker/.test(error.message)) throw error;
+        if (!(error instanceof Error) || !/lease is missing, expired, or owned/.test(error.message)) {
+          throw error;
+        }
         duplicateCompletionRejections += 1;
       }
     }

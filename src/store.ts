@@ -237,9 +237,11 @@ export class JobStore {
         UPDATE jobs
         SET status = 'succeeded', result = ?, error = NULL, worker_id = NULL,
             lease_expires_at = NULL, updated_at = ?
-        WHERE id = ? AND status = 'running' AND worker_id = ?
-      `).run(JSON.stringify(result), now, id, workerId);
-      if (change.changes !== 1) throw new Error("job is not running for this worker");
+        WHERE id = ? AND status = 'running' AND worker_id = ? AND lease_expires_at > ?
+      `).run(JSON.stringify(result), now, id, workerId, now);
+      if (change.changes !== 1) {
+        throw new Error("job lease is missing, expired, or owned by another worker");
+      }
       this.recordEvent(id, "completed", "running", "succeeded", workerId, {}, now);
       return this.get(id)!;
     });
@@ -266,22 +268,25 @@ export class JobStore {
     if (retryDelayMs !== undefined && (!Number.isFinite(retryDelayMs) || retryDelayMs < 0)) {
       throw new Error("retryDelayMs must be non-negative");
     }
-    const job = this.get(id);
-    if (!job || job.status !== "running" || job.workerId !== workerId) {
-      throw new Error("job is not running for this worker");
-    }
-
     const now = this.clock();
-    const exhausted = job.attempts >= job.maxAttempts;
-    const delayMs = exhausted ? 0 : retryDelayMs ?? this.retryDelay(job);
     return this.transaction(() => {
+      const job = this.get(id);
+      if (!job || job.status !== "running" || job.workerId !== workerId ||
+          job.leaseExpiresAt === null || job.leaseExpiresAt <= now) {
+        throw new Error("job lease is missing, expired, or owned by another worker");
+      }
+      const exhausted = job.attempts >= job.maxAttempts;
+      const delayMs = exhausted ? 0 : retryDelayMs ?? this.retryDelay(job);
       const toStatus = exhausted ? "failed" : "queued";
-      this.db.prepare(`
+      const change = this.db.prepare(`
         UPDATE jobs
         SET status = ?, error = ?, worker_id = NULL, lease_expires_at = NULL,
             available_at = ?, updated_at = ?
-        WHERE id = ?
-      `).run(toStatus, error.trim(), now + delayMs, now, id);
+        WHERE id = ? AND status = 'running' AND worker_id = ? AND lease_expires_at > ?
+      `).run(toStatus, error.trim(), now + delayMs, now, id, workerId, now);
+      if (change.changes !== 1) {
+        throw new Error("job lease is missing, expired, or owned by another worker");
+      }
       this.recordEvent(id, exhausted ? "dead_lettered" : "retry_scheduled", "running", toStatus,
         workerId, { error: error.trim(), retryDelayMs: delayMs, attempt: job.attempts }, now);
       return this.get(id)!;

@@ -16,6 +16,10 @@ while it owns that lease. Long-running handlers renew their leases periodically.
 If the worker disappears, the next claim operation recovers the expired lease
 and requeues the job. A job is moved to the failed-job view when its attempt
 budget is exhausted; an operator can requeue it with a fresh attempt budget.
+Completion and failure acknowledgements include the worker identity and an
+unexpired-lease condition in the same SQLite update. A late worker therefore
+cannot commit stale output during the gap between its deadline and lease
+recovery by another claim.
 
 At-least-once delivery means a worker can finish an external side effect and
 crash before recording completion. Production handlers therefore need to be

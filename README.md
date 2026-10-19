@@ -21,7 +21,7 @@ protocol, and HTTP control plane are implemented in this repository.
 - Atomic worker leases that prevent double claims
 - Automatic recovery after worker crashes
 - Renewable leases for handlers that outlive their initial claim
-- Worker acknowledgements that surface rejected completion and failure writes
+- Worker acknowledgements that reject expired or stale completion and failure writes
 - Explicit success, failure, cancellation, and retry transitions
 - Dead-letter inspection and operator-controlled redrive
 - Durable, ordered event history for every job transition
