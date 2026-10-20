@@ -21,10 +21,11 @@ async function stopWorker(worker: ChildProcessWithoutNullStreams): Promise<void>
   ]);
 }
 
-test("worker does not report completion when the control plane rejects it", async () => {
+test("worker separates handler failures from rejected completions", async () => {
   let claims = 0;
   let completions = 0;
-  let failures = 0;
+  let misclassifiedFailures = 0;
+  let handlerFailures = 0;
   const server = createServer((request, response) => {
     if (request.url?.includes("/claim")) {
       claims += 1;
@@ -33,16 +34,30 @@ test("worker does not report completion when the control plane rejects it", asyn
         response.end(JSON.stringify({ id: "job-1", type: "uppercase", payload: "hello" }));
         return;
       }
+      if (claims === 2) {
+        response.writeHead(200, { "content-type": "application/json" });
+        response.end(JSON.stringify({ id: "job-handler-error", type: "missing", payload: null }));
+        return;
+      }
       response.writeHead(204).end();
       return;
     }
     if (request.url === "/jobs/job-1/complete") {
       completions += 1;
-    } else if (request.url === "/jobs/job-1/fail") {
-      failures += 1;
+      response.writeHead(409, { "content-type": "application/json" });
+      response.end(JSON.stringify({ error: "lease lost" }));
+      return;
     }
-    response.writeHead(409, { "content-type": "application/json" });
-    response.end(JSON.stringify({ error: "lease lost" }));
+    if (request.url === "/jobs/job-1/fail") {
+      misclassifiedFailures += 1;
+    }
+    if (request.url === "/jobs/job-handler-error/fail") {
+      handlerFailures += 1;
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end("{}");
+      return;
+    }
+    response.writeHead(500).end();
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address() as AddressInfo;
@@ -61,7 +76,10 @@ test("worker does not report completion when the control plane rejects it", asyn
   worker.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
 
   try {
-    await waitUntil(() => completions === 1 && failures === 1, 5_000);
+    await waitUntil(
+      () => handlerFailures === 1 && /failed job-handler-error: unknown job type: missing/.test(stderr),
+      5_000,
+    );
   } finally {
     try {
       await stopWorker(worker);
@@ -73,9 +91,11 @@ test("worker does not report completion when the control plane rejects it", asyn
   }
 
   assert.equal(completions, 1);
-  assert.equal(failures, 1);
+  assert.equal(misclassifiedFailures, 0);
+  assert.equal(handlerFailures, 1);
   assert.doesNotMatch(stdout, /completed job-1/);
-  assert.match(stderr, /failure acknowledgement for job-1 returned 409: lease lost/);
+  assert.match(stderr, /completion for job-1 returned 409: lease lost/);
+  assert.match(stderr, /failed job-handler-error: unknown job type: missing/);
 });
 
 test("worker renews the shortest supported lease before it expires", async () => {

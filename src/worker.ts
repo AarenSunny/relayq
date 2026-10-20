@@ -74,21 +74,25 @@ async function run(): Promise<void> {
       }, heartbeatIntervalMs);
       heartbeat.unref();
       try {
-        if (!handler) throw new Error(`unknown job type: ${job.type}`);
-        const result = await handler(job.payload);
+        let result: unknown;
+        try {
+          if (!handler) throw new Error(`unknown job type: ${job.type}`);
+          result = await handler(job.payload);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const failure = await request(`/jobs/${job.id}/fail`, {
+            method: "POST",
+            body: JSON.stringify({ workerId, error: message }),
+          });
+          await requireSuccess(failure, `failure acknowledgement for ${job.id}`);
+          console.error(`failed ${job.id}: ${message}`);
+          continue;
+        }
         const completion = await request(`/jobs/${job.id}/complete`, {
           method: "POST", body: JSON.stringify({ workerId, result }),
         });
         await requireSuccess(completion, `completion for ${job.id}`);
         console.log(`completed ${job.id} (${job.type})`);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        const failure = await request(`/jobs/${job.id}/fail`, {
-          method: "POST",
-          body: JSON.stringify({ workerId, error: message }),
-        });
-        await requireSuccess(failure, `failure acknowledgement for ${job.id}`);
-        console.error(`failed ${job.id}: ${message}`);
       } finally {
         clearInterval(heartbeat);
       }

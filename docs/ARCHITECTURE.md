@@ -20,6 +20,9 @@ Completion and failure acknowledgements include the worker identity and an
 unexpired-lease condition in the same SQLite update. A late worker therefore
 cannot commit stale output during the gap between its deadline and lease
 recovery by another claim.
+If completion acknowledgement is rejected or unreachable, the worker does not
+misclassify the successful handler run as a task failure; it stops heartbeating
+and lets lease recovery decide the next attempt.
 
 At-least-once delivery means a worker can finish an external side effect and
 crash before recording completion. Production handlers therefore need to be

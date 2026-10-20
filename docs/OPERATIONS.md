@@ -146,9 +146,10 @@ the experiment cannot mutate the development or demo queue.
 - Pause dispatch during maintenance with `POST /admin/pause`, then restore it
   with `POST /admin/resume`; current leases can still finish while paused.
 - Workers log completion only after the API accepts the lease-owned transition.
-  A rejected completion is routed through failure acknowledgement; if that is
-  also rejected, the worker reports the control-plane error rather than a false
-  success.
+  A rejected completion is reported as a control-plane error and is not turned
+  into a handler failure: the worker may no longer own the lease, and the queue
+  will recover it through normal lease expiry. Actual handler errors still use
+  the lease-owned failure endpoint and durable retry policy.
 - Workers request renewal at roughly one-third of the configured lease, including
   the minimum one-second lease. Renewal timers are best effort: event-loop stalls
   or network delays can still expire a lease, so handlers remain idempotent.
