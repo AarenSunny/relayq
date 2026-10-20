@@ -101,14 +101,16 @@ test("worker separates handler failures from rejected completions", async () => 
 test("worker renews the shortest supported lease before it expires", async () => {
   let claims = 0;
   let heartbeats = 0;
+  let heartbeatsInFlight = 0;
+  let maxHeartbeatsInFlight = 0;
   let completions = 0;
   let failures = 0;
-  const server = createServer((request, response) => {
+  const server = createServer(async (request, response) => {
     if (request.url?.includes("/claim")) {
       claims += 1;
       if (claims === 1) {
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({ id: "job-short-lease", type: "sleep", payload: 1_200 }));
+        response.end(JSON.stringify({ id: "job-short-lease", type: "sleep", payload: 1_500 }));
         return;
       }
       response.writeHead(204).end();
@@ -116,6 +118,10 @@ test("worker renews the shortest supported lease before it expires", async () =>
     }
     if (request.url === "/jobs/job-short-lease/heartbeat") {
       heartbeats += 1;
+      heartbeatsInFlight += 1;
+      maxHeartbeatsInFlight = Math.max(maxHeartbeatsInFlight, heartbeatsInFlight);
+      await delay(400);
+      heartbeatsInFlight -= 1;
       response.writeHead(200, { "content-type": "application/json" });
       response.end("{}");
       return;
@@ -155,6 +161,7 @@ test("worker renews the shortest supported lease before it expires", async () =>
   }
 
   assert.ok(heartbeats >= 2, `expected at least two early renewals, received ${heartbeats}`);
+  assert.equal(maxHeartbeatsInFlight, 1);
   assert.equal(completions, 1);
   assert.equal(failures, 0);
 });

@@ -62,7 +62,10 @@ async function run(): Promise<void> {
       if (!response.ok) throw new Error(`claim failed with ${response.status}`);
       const job = await response.json() as { id: string; type: string; payload: unknown };
       const handler = handlers[job.type];
+      let renewalInFlight = false;
       const heartbeat = setInterval(async () => {
+        if (renewalInFlight) return;
+        renewalInFlight = true;
         try {
           const renewal = await request(`/jobs/${job.id}/heartbeat`, {
             method: "POST", body: JSON.stringify({ workerId, leaseMs }),
@@ -70,6 +73,8 @@ async function run(): Promise<void> {
           if (!renewal.ok) console.error(`lease renewal for ${job.id} returned ${renewal.status}`);
         } catch (error) {
           console.error(`lease renewal for ${job.id} failed: ${error}`);
+        } finally {
+          renewalInFlight = false;
         }
       }, heartbeatIntervalMs);
       heartbeat.unref();

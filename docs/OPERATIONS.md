@@ -151,8 +151,10 @@ the experiment cannot mutate the development or demo queue.
   will recover it through normal lease expiry. Actual handler errors still use
   the lease-owned failure endpoint and durable retry policy.
 - Workers request renewal at roughly one-third of the configured lease, including
-  the minimum one-second lease. Renewal timers are best effort: event-loop stalls
-  or network delays can still expire a lease, so handlers remain idempotent.
+  the minimum one-second lease. Each worker keeps at most one renewal request in
+  flight per job, preventing a slow control plane from accumulating overlapping
+  heartbeats. Renewal timers are best effort: event-loop stalls or network delays
+  can still expire a lease, so handlers remain idempotent.
 - Redrive and retention calls are bounded. Follow the
   [administration runbook](ADMINISTRATION.md) for safe maintenance sequences.
 - Scale only the stateless `worker` service in the SQLite configuration.
