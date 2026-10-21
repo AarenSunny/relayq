@@ -62,22 +62,25 @@ async function run(): Promise<void> {
       if (!response.ok) throw new Error(`claim failed with ${response.status}`);
       const job = await response.json() as { id: string; type: string; payload: unknown };
       const handler = handlers[job.type];
-      let renewalInFlight = false;
-      const heartbeat = setInterval(async () => {
+      let renewalInFlight: Promise<void> | null = null;
+      const heartbeat = setInterval(() => {
         if (renewalInFlight) return;
-        renewalInFlight = true;
-        try {
-          const renewal = await request(`/jobs/${job.id}/heartbeat`, {
-            method: "POST", body: JSON.stringify({ workerId, leaseMs }),
-          });
-          if (!renewal.ok) console.error(`lease renewal for ${job.id} returned ${renewal.status}`);
-        } catch (error) {
-          console.error(`lease renewal for ${job.id} failed: ${error}`);
-        } finally {
-          renewalInFlight = false;
-        }
+        renewalInFlight = (async () => {
+          try {
+            const renewal = await request(`/jobs/${job.id}/heartbeat`, {
+              method: "POST", body: JSON.stringify({ workerId, leaseMs }),
+            });
+            if (!renewal.ok) console.error(`lease renewal for ${job.id} returned ${renewal.status}`);
+          } catch (error) {
+            console.error(`lease renewal for ${job.id} failed: ${error}`);
+          }
+        })().finally(() => { renewalInFlight = null; });
       }, heartbeatIntervalMs);
       heartbeat.unref();
+      const stopHeartbeats = async (): Promise<void> => {
+        clearInterval(heartbeat);
+        if (renewalInFlight) await renewalInFlight;
+      };
       try {
         let result: unknown;
         try {
@@ -85,6 +88,7 @@ async function run(): Promise<void> {
           result = await handler(job.payload);
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
+          await stopHeartbeats();
           const failure = await request(`/jobs/${job.id}/fail`, {
             method: "POST",
             body: JSON.stringify({ workerId, error: message }),
@@ -93,6 +97,7 @@ async function run(): Promise<void> {
           console.error(`failed ${job.id}: ${message}`);
           continue;
         }
+        await stopHeartbeats();
         const completion = await request(`/jobs/${job.id}/complete`, {
           method: "POST", body: JSON.stringify({ workerId, result }),
         });

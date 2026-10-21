@@ -153,8 +153,11 @@ the experiment cannot mutate the development or demo queue.
 - Workers request renewal at roughly one-third of the configured lease, including
   the minimum one-second lease. Each worker keeps at most one renewal request in
   flight per job, preventing a slow control plane from accumulating overlapping
-  heartbeats. Renewal timers are best effort: event-loop stalls or network delays
-  can still expire a lease, so handlers remain idempotent.
+  heartbeats. A worker also awaits that request before acknowledging completion
+  or failure, preventing its own lease mutations from overlapping. Renewal timers
+  are best effort and requests have no timeout: event-loop stalls or network
+  delays can still expire a lease or delay acknowledgement, so handlers remain
+  idempotent.
 - Redrive and retention calls are bounded. Follow the
   [administration runbook](ADMINISTRATION.md) for safe maintenance sequences.
 - Scale only the stateless `worker` service in the SQLite configuration.

@@ -20,6 +20,10 @@ Completion and failure acknowledgements include the worker identity and an
 unexpired-lease condition in the same SQLite update. A late worker therefore
 cannot commit stale output during the gap between its deadline and lease
 recovery by another claim.
+Before either terminal acknowledgement, the worker stops its heartbeat timer
+and awaits any renewal already in flight. This keeps one worker from racing its
+own renewal against completion or failure; a stalled renewal can consequently
+delay that acknowledgement because the demo worker has no request timeout.
 If completion acknowledgement is rejected or unreachable, the worker does not
 misclassify the successful handler run as a task failure; it stops heartbeating
 and lets lease recovery decide the next attempt.

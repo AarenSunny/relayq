@@ -98,19 +98,22 @@ test("worker separates handler failures from rejected completions", async () => 
   assert.match(stderr, /failed job-handler-error: unknown job type: missing/);
 });
 
-test("worker renews the shortest supported lease before it expires", async () => {
+test("worker renews the shortest lease without overlapping its terminal acknowledgement", async () => {
   let claims = 0;
   let heartbeats = 0;
   let heartbeatsInFlight = 0;
   let maxHeartbeatsInFlight = 0;
+  let terminalOverlaps = 0;
   let completions = 0;
   let failures = 0;
+  let releaseHeartbeat = (): void => {};
+  const heartbeatGate = new Promise<void>((resolve) => { releaseHeartbeat = resolve; });
   const server = createServer(async (request, response) => {
     if (request.url?.includes("/claim")) {
       claims += 1;
       if (claims === 1) {
         response.writeHead(200, { "content-type": "application/json" });
-        response.end(JSON.stringify({ id: "job-short-lease", type: "sleep", payload: 1_500 }));
+        response.end(JSON.stringify({ id: "job-short-lease", type: "sleep", payload: 2_000 }));
         return;
       }
       response.writeHead(204).end();
@@ -120,7 +123,8 @@ test("worker renews the shortest supported lease before it expires", async () =>
       heartbeats += 1;
       heartbeatsInFlight += 1;
       maxHeartbeatsInFlight = Math.max(maxHeartbeatsInFlight, heartbeatsInFlight);
-      await delay(400);
+      if (heartbeats === 1) await delay(100);
+      else await heartbeatGate;
       heartbeatsInFlight -= 1;
       response.writeHead(200, { "content-type": "application/json" });
       response.end("{}");
@@ -128,11 +132,15 @@ test("worker renews the shortest supported lease before it expires", async () =>
     }
     if (request.url === "/jobs/job-short-lease/complete") {
       completions += 1;
+      if (heartbeatsInFlight > 0) terminalOverlaps += 1;
       response.writeHead(200, { "content-type": "application/json" });
       response.end("{}");
       return;
     }
-    if (request.url === "/jobs/job-short-lease/fail") failures += 1;
+    if (request.url === "/jobs/job-short-lease/fail") {
+      failures += 1;
+      if (heartbeatsInFlight > 0) terminalOverlaps += 1;
+    }
     response.writeHead(500).end();
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -149,8 +157,13 @@ test("worker renews the shortest supported lease before it expires", async () =>
   });
 
   try {
+    await waitUntil(() => heartbeats >= 2, 5_000);
+    await delay(1_600);
+    assert.equal(completions, 0, "completion raced the in-flight renewal");
+    releaseHeartbeat();
     await waitUntil(() => completions === 1, 5_000);
   } finally {
+    releaseHeartbeat();
     try {
       await stopWorker(worker);
     } finally {
@@ -162,6 +175,7 @@ test("worker renews the shortest supported lease before it expires", async () =>
 
   assert.ok(heartbeats >= 2, `expected at least two early renewals, received ${heartbeats}`);
   assert.equal(maxHeartbeatsInFlight, 1);
+  assert.equal(terminalOverlaps, 0);
   assert.equal(completions, 1);
   assert.equal(failures, 0);
 });
