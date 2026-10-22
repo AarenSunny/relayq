@@ -21,6 +21,40 @@ async function stopWorker(worker: ChildProcessWithoutNullStreams): Promise<void>
   ]);
 }
 
+test("worker rejects invalid timing settings before polling", async (context) => {
+  const cases = [
+    { name: "zero poll interval", environment: { POLL_MS: "0" }, setting: "POLL_MS" },
+    { name: "short lease", environment: { LEASE_MS: "999" }, setting: "LEASE_MS" },
+    { name: "non-numeric lease", environment: { LEASE_MS: "soon" }, setting: "LEASE_MS" },
+  ];
+
+  for (const testCase of cases) {
+    await context.test(testCase.name, async () => {
+      const worker = spawn(process.execPath, ["src/worker.ts"], {
+        cwd: process.cwd(),
+        env: { ...process.env, ...testCase.environment },
+      });
+      let stdout = "";
+      let stderr = "";
+      worker.stdout.setEncoding("utf8").on("data", (chunk: string) => { stdout += chunk; });
+      worker.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+
+      try {
+        const code = await Promise.race([
+          once(worker, "exit").then(([exitCode]) => exitCode),
+          delay(2_000).then(() => { throw new Error("worker did not reject invalid settings"); }),
+        ]);
+        assert.notEqual(code, 0);
+      } finally {
+        await stopWorker(worker);
+      }
+
+      assert.equal(stdout, "");
+      assert.match(stderr, new RegExp(`${testCase.setting} must be an integer`));
+    });
+  }
+});
+
 test("worker separates handler failures from rejected completions", async () => {
   let claims = 0;
   let completions = 0;

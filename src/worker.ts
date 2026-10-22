@@ -2,8 +2,18 @@ import { setTimeout as delay } from "node:timers/promises";
 
 const baseUrl = process.env.RELAYQ_URL ?? "http://localhost:8080";
 const workerId = process.env.WORKER_ID ?? `worker-${process.env.HOSTNAME ?? process.pid}`;
-const pollMs = Number(process.env.POLL_MS ?? 500);
-const leaseMs = Number(process.env.LEASE_MS ?? 30_000);
+const timerMaximumMs = 2_147_483_647;
+
+function durationSetting(name: string, fallback: number, minimum: number): number {
+  const value = Number(process.env[name] ?? fallback);
+  if (!Number.isSafeInteger(value) || value < minimum || value > timerMaximumMs) {
+    throw new Error(`${name} must be an integer from ${minimum} to ${timerMaximumMs}`);
+  }
+  return value;
+}
+
+const pollMs = durationSetting("POLL_MS", 500, 1);
+const leaseMs = durationSetting("LEASE_MS", 30_000, 1_000);
 const apiKey = process.env.RELAYQ_API_KEY;
 const heartbeatIntervalMs = Math.max(1, Math.floor(leaseMs / 3));
 
