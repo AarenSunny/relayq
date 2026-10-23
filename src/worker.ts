@@ -14,6 +14,7 @@ function durationSetting(name: string, fallback: number, minimum: number): numbe
 
 const pollMs = durationSetting("POLL_MS", 500, 1);
 const leaseMs = durationSetting("LEASE_MS", 30_000, 1_000);
+const requestTimeoutMs = durationSetting("REQUEST_TIMEOUT_MS", 10_000, 1);
 const apiKey = process.env.RELAYQ_API_KEY;
 const heartbeatIntervalMs = Math.max(1, Math.floor(leaseMs / 3));
 
@@ -38,6 +39,7 @@ const handlers: Record<string, (payload: unknown) => Promise<unknown>> = {
 async function request(path: string, init?: RequestInit): Promise<Response> {
   return fetch(`${baseUrl}${path}`, {
     ...init,
+    signal: AbortSignal.timeout(requestTimeoutMs),
     headers: {
       "content-type": "application/json",
       ...(apiKey ? { authorization: `Bearer ${apiKey}` } : {}),

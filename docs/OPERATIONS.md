@@ -155,10 +155,11 @@ the experiment cannot mutate the development or demo queue.
   flight per job, preventing a slow control plane from accumulating overlapping
   heartbeats. A worker also awaits that request before acknowledging completion
   or failure, preventing its own lease mutations from overlapping. Renewal timers
-  are best effort and requests have no timeout: event-loop stalls or network
-  delays can still expire a lease or delay acknowledgement, so handlers remain
-  idempotent. Invalid `POLL_MS` or `LEASE_MS` values fail at startup instead of
-  silently creating a busy poll loop or an unusable lease.
+  are best effort, and control-plane requests time out after 10 seconds by default
+  (`REQUEST_TIMEOUT_MS`). Event-loop stalls or network delays can still expire a
+  lease, so handlers remain idempotent. Invalid `POLL_MS`, `LEASE_MS`, or
+  `REQUEST_TIMEOUT_MS` values fail at startup instead of silently creating a busy
+  poll loop, an unusable lease, or an unbounded request.
 - Redrive and retention calls are bounded. Follow the
   [administration runbook](ADMINISTRATION.md) for safe maintenance sequences.
 - Scale only the stateless `worker` service in the SQLite configuration.

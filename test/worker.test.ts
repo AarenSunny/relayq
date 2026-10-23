@@ -26,6 +26,11 @@ test("worker rejects invalid timing settings before polling", async (context) =>
     { name: "zero poll interval", environment: { POLL_MS: "0" }, setting: "POLL_MS" },
     { name: "short lease", environment: { LEASE_MS: "999" }, setting: "LEASE_MS" },
     { name: "non-numeric lease", environment: { LEASE_MS: "soon" }, setting: "LEASE_MS" },
+    {
+      name: "zero request timeout",
+      environment: { REQUEST_TIMEOUT_MS: "0" },
+      setting: "REQUEST_TIMEOUT_MS",
+    },
   ];
 
   for (const testCase of cases) {
@@ -53,6 +58,44 @@ test("worker rejects invalid timing settings before polling", async (context) =>
       assert.match(stderr, new RegExp(`${testCase.setting} must be an integer`));
     });
   }
+});
+
+test("worker bounds an unresponsive control-plane request", async () => {
+  let abandonedRequests = 0;
+  const server = createServer((_request, response) => {
+    response.on("close", () => {
+      if (!response.writableEnded) abandonedRequests += 1;
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const address = server.address() as AddressInfo;
+  const worker = spawn(process.execPath, ["src/worker.ts"], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      RELAYQ_URL: `http://127.0.0.1:${address.port}`,
+      WORKER_ID: "timeout-test-worker",
+      POLL_MS: "10",
+      REQUEST_TIMEOUT_MS: "50",
+    },
+  });
+  let stderr = "";
+  worker.stderr.setEncoding("utf8").on("data", (chunk: string) => { stderr += chunk; });
+
+  try {
+    await waitUntil(() => abandonedRequests >= 1, 2_000);
+  } finally {
+    try {
+      await stopWorker(worker);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => error ? reject(error) : resolve()));
+    }
+  }
+
+  assert.ok(abandonedRequests >= 1);
+  assert.match(stderr, /aborted|timeout/i);
 });
 
 test("worker separates handler failures from rejected completions", async () => {
