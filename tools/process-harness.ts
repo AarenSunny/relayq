@@ -53,16 +53,21 @@ export function startWorkerProcess(options: WorkerProcessOptions): WorkerProcess
   return { process: worker, ready, errors };
 }
 
-export async function stopWorkerProcess(worker: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
+export async function stopWorkerProcess(
+  worker: ChildProcess,
+  signal: NodeJS.Signals = "SIGTERM",
+  graceMs = 2_000,
+): Promise<void> {
   if (worker.exitCode !== null || worker.signalCode !== null) return;
   const exited = new Promise<void>((resolveExit) => worker.once("exit", () => resolveExit()));
   worker.kill(signal);
   await Promise.race([
     exited,
-    delay(2_000, undefined, { ref: false }).then(() => {
+    delay(graceMs, undefined, { ref: false }).then(() => {
       if (worker.exitCode === null && worker.signalCode === null) worker.kill("SIGKILL");
     }),
   ]);
+  if (worker.exitCode === null && worker.signalCode === null) await exited;
 }
 
 export async function closeHttpServer(server: Server): Promise<void> {
