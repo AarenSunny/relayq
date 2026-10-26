@@ -8,6 +8,10 @@ import { createRelayServer } from "../src/server.ts";
 import { JobStore } from "../src/store.ts";
 import type { JobEvent, QueueStats } from "../src/types.ts";
 import {
+  captureExperimentEnvironment,
+  type ExperimentEnvironment,
+} from "./experiment-environment.ts";
+import {
   closeHttpServer,
   listenOnLoopback,
   startWorkerProcess,
@@ -23,6 +27,7 @@ export interface ProcessCrashOptions {
 
 export interface ProcessCrashReport {
   model: "killed-worker-process-single-api";
+  environment: ExperimentEnvironment;
   leaseMs: number;
   taskMs: number;
   recoveryAfterCrashMs: number;
@@ -83,6 +88,7 @@ export async function runProcessCrashExperiment(
   options: ProcessCrashOptions,
 ): Promise<ProcessCrashReport> {
   validateOptions(options);
+  const environment = captureExperimentEnvironment();
   const directory = mkdtempSync(join(tmpdir(), "relayq-process-crash-"));
   const store = new JobStore(join(directory, "queue.db"));
   const server = createRelayServer(store);
@@ -146,6 +152,7 @@ export async function runProcessCrashExperiment(
 
     return {
       model: "killed-worker-process-single-api",
+      environment,
       leaseMs: options.leaseMs,
       taskMs: options.taskMs,
       recoveryAfterCrashMs: Math.round(recoveredAt - crashedAt),

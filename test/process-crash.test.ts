@@ -9,6 +9,11 @@ test("a replacement process recovers work after its owner is killed", async () =
     timeoutMs: 5_000,
   });
 
+  assert.equal(report.environment.nodeVersion, process.version);
+  assert.ok(report.environment.platform.length > 0);
+  assert.ok(report.environment.operatingSystemRelease.length > 0);
+  assert.ok(report.environment.architecture.length > 0);
+  assert.ok(report.environment.availableParallelism > 0);
   assert.equal(report.crashedWorkerSignal, "SIGKILL");
   assert.equal(report.attempts, 2);
   assert.deepEqual(report.eventSequence, [

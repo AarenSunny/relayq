@@ -37,10 +37,11 @@ npm run multi-worker -- --jobs 200 --workers 8 --task-ms 25 --json
 
 The JSON report includes wall-clock throughput, completion counts per worker,
 enqueue-to-completion p50/p95/max latency, final queue statistics, explicit
-invariants, and limitations. Latency is derived from durable lifecycle-event
-timestamps, and the report verifies that every completion has a matching
-enqueue sample. Runs use an isolated temporary database, accept at most 500
-jobs and 32 workers, and remove their state on exit.
+invariants, limitations, and runtime metadata (Node version, operating system,
+architecture, and available parallelism). Latency is derived from durable
+lifecycle-event timestamps, and the report verifies that every completion has
+a matching enqueue sample. Runs use an isolated temporary database, accept at
+most 500 jobs and 32 workers, and remove their state on exit.
 
 Reference run on October 17, 2026: Node.js 24.16.0 on an Apple M4 running macOS
 27.0 completed 100 25-ms jobs with four active worker processes in 0.794
@@ -96,7 +97,9 @@ npm run process-crash -- --lease-ms 1000 --task-ms 250 --json
 The experiment starts an API and worker, waits until the worker owns a timed
 job, kills that process with `SIGKILL`, and starts a replacement. The report
 verifies the expired lease, two claim attempts, one recorded completion, the
-replacement's identity, and an empty final queue.
+replacement's identity, and an empty final queue. It carries the same runtime
+metadata as the load experiment so recovery measurements retain their host
+context.
 
 Reference run on October 11, 2026: Node.js 24.16.0 on an Apple M4 running macOS
 27.0 recovered and completed the job 1,256 ms after the crash with a 1,000-ms

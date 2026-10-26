@@ -9,6 +9,10 @@ import { createRelayServer } from "../src/server.ts";
 import { JobStore } from "../src/store.ts";
 import type { JobEvent, QueueStats } from "../src/types.ts";
 import {
+  captureExperimentEnvironment,
+  type ExperimentEnvironment,
+} from "./experiment-environment.ts";
+import {
   closeHttpServer,
   listenOnLoopback,
   startWorkerProcess,
@@ -24,6 +28,7 @@ export interface MultiWorkerOptions {
 
 export interface MultiWorkerReport {
   model: "separate-http-workers-single-api";
+  environment: ExperimentEnvironment;
   jobs: number;
   workerProcesses: number;
   activeWorkers: number;
@@ -93,6 +98,7 @@ export async function runMultiWorkerExperiment(
   options: MultiWorkerOptions,
 ): Promise<MultiWorkerReport> {
   validateOptions(options);
+  const environment = captureExperimentEnvironment();
   const directory = mkdtempSync(join(tmpdir(), "relayq-multi-worker-"));
   const store = new JobStore(join(directory, "queue.db"));
   const server = createRelayServer(store);
@@ -163,6 +169,7 @@ export async function runMultiWorkerExperiment(
     const elapsedSeconds = (finished - started) / 1_000;
     return {
       model: "separate-http-workers-single-api",
+      environment,
       jobs: options.jobs,
       workerProcesses: options.workers,
       activeWorkers,
