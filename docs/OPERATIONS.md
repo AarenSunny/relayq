@@ -163,6 +163,11 @@ the experiment cannot mutate the development or demo queue.
   lease, so handlers remain idempotent. Invalid `POLL_MS`, `LEASE_MS`, or
   `REQUEST_TIMEOUT_MS` values fail at startup instead of silently creating a busy
   poll loop, an unusable lease, or an unbounded request.
+- The queue validates claim and renewal leases as whole milliseconds from 1,000
+  through 2,147,483,647 before opening a SQLite transaction. This matches the
+  worker timer range and prevents oversized input from creating an
+  unrepresentable or effectively unbounded lease. It does not replace
+  deployment-specific maximum-runtime policy or monitoring for stuck work.
 - Redrive and retention calls are bounded. Follow the
   [administration runbook](ADMINISTRATION.md) for safe maintenance sequences.
 - Scale only the stateless `worker` service in the SQLite configuration.

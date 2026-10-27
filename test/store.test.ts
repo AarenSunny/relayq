@@ -121,6 +121,34 @@ test("a worker can renew its lease but another worker cannot", () => {
   store.close();
 });
 
+test("invalid lease durations are rejected before queue state changes", () => {
+  let now = 25_000;
+  const store = new JobStore(":memory:", () => now);
+  const job = store.enqueue({ type: "bounded-lease" });
+  const invalidDurations = [999, 1_000.5, Number.MAX_SAFE_INTEGER];
+
+  for (const leaseMs of invalidDurations) {
+    assert.throws(
+      () => store.claim("worker-a", leaseMs),
+      /leaseMs must be an integer between 1000 and 2147483647/,
+    );
+    assert.deepEqual(
+      { status: store.get(job.id)?.status, attempts: store.get(job.id)?.attempts },
+      { status: "queued", attempts: 0 },
+    );
+  }
+
+  const claimed = store.claim("worker-a", 1_000)!;
+  assert.equal(claimed.leaseExpiresAt, 26_000);
+  now += 100;
+  assert.throws(
+    () => store.renewLease(job.id, "worker-a", Number.MAX_SAFE_INTEGER),
+    /leaseMs must be an integer between 1000 and 2147483647/,
+  );
+  assert.equal(store.get(job.id)?.leaseExpiresAt, 26_000);
+  store.close();
+});
+
 test("an operator can requeue a dead-lettered job with a fresh attempt budget", () => {
   let now = 30_000;
   const store = new JobStore(":memory:", () => now);

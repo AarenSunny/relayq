@@ -7,6 +7,14 @@ type Random = () => number;
 type JobRow = Record<string, unknown>;
 
 const TERMINAL_STATUSES = new Set<JobStatus>(["succeeded", "failed", "cancelled"]);
+const MIN_LEASE_MS = 1_000;
+const MAX_LEASE_MS = 2_147_483_647;
+
+function validateLeaseMs(leaseMs: number): void {
+  if (!Number.isSafeInteger(leaseMs) || leaseMs < MIN_LEASE_MS || leaseMs > MAX_LEASE_MS) {
+    throw new Error(`leaseMs must be an integer between ${MIN_LEASE_MS} and ${MAX_LEASE_MS}`);
+  }
+}
 
 export class JobStore {
   private readonly db: DatabaseSync;
@@ -193,7 +201,7 @@ export class JobStore {
 
   claim(workerId: string, leaseMs = 30_000): Job | null {
     if (!workerId?.trim()) throw new Error("workerId is required");
-    if (!Number.isFinite(leaseMs) || leaseMs < 1_000) throw new Error("leaseMs must be at least 1000");
+    validateLeaseMs(leaseMs);
 
     const now = this.clock();
     this.db.exec("BEGIN IMMEDIATE");
@@ -249,7 +257,7 @@ export class JobStore {
 
   renewLease(id: string, workerId: string, leaseMs = 30_000): Job {
     if (!workerId?.trim()) throw new Error("workerId is required");
-    if (!Number.isFinite(leaseMs) || leaseMs < 1_000) throw new Error("leaseMs must be at least 1000");
+    validateLeaseMs(leaseMs);
     const now = this.clock();
     return this.transaction(() => {
       const change = this.db.prepare(`
