@@ -16,8 +16,10 @@ Authorization: Bearer replace-with-a-random-secret
 ```
 
 Token comparisons use constant-time byte comparison. The server also rejects
-non-JSON request bodies, caps payloads at 1 MB, and sets defensive content-type,
-framing, and referrer headers.
+non-JSON request bodies, requires a JSON object, caps payloads at 1 MB, and sets
+defensive content-type, framing, and referrer headers. Invalid JSON shapes
+return HTTP 400, unsupported media types return 415, and oversized bodies return
+413 so clients can distinguish malformed input from resource limits.
 
 ## Scope and limitations
 

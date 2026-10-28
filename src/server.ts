@@ -55,7 +55,7 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > 1_000_000) throw new Error("request body exceeds 1 MB");
+    if (size > 1_000_000) throw new ApiError(413, "request body exceeds 1 MB");
     chunks.push(chunk);
   }
   if (chunks.length === 0) return {};
@@ -65,7 +65,7 @@ async function readJson(request: IncomingMessage): Promise<Record<string, unknow
   }
   const value = JSON.parse(Buffer.concat(chunks).toString("utf8"));
   if (!value || Array.isArray(value) || typeof value !== "object") {
-    throw new Error("request body must be a JSON object");
+    throw new ApiError(400, "request body must be a JSON object");
   }
   return value;
 }

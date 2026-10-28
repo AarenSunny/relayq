@@ -49,3 +49,25 @@ test("request bodies require JSON and responses include defensive headers", asyn
   assert.equal(health.headers.get("x-frame-options"), "DENY");
   assert.equal(health.headers.get("referrer-policy"), "no-referrer");
 });
+
+test("malformed and oversized JSON bodies return precise client errors", async () => {
+  const request = (body: string) => fetch(`${baseUrl}/jobs`, {
+    method: "POST",
+    headers: {
+      authorization: "Bearer test-secret",
+      "content-type": "application/json",
+    },
+    body,
+  });
+
+  const nonObject = await request("[]");
+  assert.equal(nonObject.status, 400);
+  assert.deepEqual(await nonObject.json(), { error: "request body must be a JSON object" });
+
+  const oversized = await request(JSON.stringify({
+    type: "oversized",
+    payload: "x".repeat(1_000_000),
+  }));
+  assert.equal(oversized.status, 413);
+  assert.deepEqual(await oversized.json(), { error: "request body exceeds 1 MB" });
+});
