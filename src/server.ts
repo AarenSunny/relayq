@@ -25,7 +25,12 @@ function json(response: ServerResponse, status: number, body: unknown): void {
   response.end(JSON.stringify(body));
 }
 
-function streamEvents(request: IncomingMessage, response: ServerResponse, store: JobStore, url: URL): void {
+export function streamEvents(
+  request: IncomingMessage,
+  response: ServerResponse,
+  store: JobStore,
+  url: URL,
+): void {
   const headerCursor = Array.isArray(request.headers["last-event-id"])
     ? request.headers["last-event-id"][0]
     : request.headers["last-event-id"];
@@ -36,18 +41,47 @@ function streamEvents(request: IncomingMessage, response: ServerResponse, store:
     "cache-control": "no-cache, no-transform",
     connection: "keep-alive",
   });
-  response.write("retry: 1000\n\n");
 
-  const publish = () => {
+  let blocked = false;
+  let closed = false;
+  const resume = () => {
+    if (closed) return;
+    blocked = false;
+    publish();
+  };
+  const write = (chunk: string): boolean => {
+    if (closed || blocked) return false;
+    const accepted = response.write(chunk);
+    if (!accepted) {
+      blocked = true;
+      response.once("drain", resume);
+    }
+    return accepted;
+  };
+
+  function publish(): void {
+    if (closed || blocked) return;
     for (const event of store.listEvents(undefined, cursor, 100)) {
       cursor = event.id;
-      response.write(`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`);
+      if (!write(`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`)) break;
     }
-  };
-  publish();
+  }
+
   const poller = setInterval(publish, 500);
-  const keepAlive = setInterval(() => response.write(": keep-alive\n\n"), 15_000);
-  request.on("close", () => { clearInterval(poller); clearInterval(keepAlive); });
+  const keepAlive = setInterval(() => { write(": keep-alive\n\n"); }, 15_000);
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(poller);
+    clearInterval(keepAlive);
+    response.off("drain", resume);
+    request.off("close", cleanup);
+    response.off("close", cleanup);
+  };
+  request.on("close", cleanup);
+  response.on("close", cleanup);
+
+  if (write("retry: 1000\n\n")) publish();
 }
 
 async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {

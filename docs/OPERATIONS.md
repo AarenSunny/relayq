@@ -170,6 +170,11 @@ the experiment cannot mutate the development or demo queue.
   deployment-specific maximum-runtime policy or monitoring for stuck work.
 - Redrive and retention calls are bounded. Follow the
   [administration runbook](ADMINISTRATION.md) for safe maintenance sequences.
+- Live event streams honor HTTP response backpressure and stop querying SQLite
+  while a client's response buffer is full. They resume from the last queued
+  event ID after `drain`. This prevents one slow reader from causing unbounded
+  application writes, but it is not a global stream-count limit or a substitute
+  for proxy connection limits and rate limiting.
 - Scale only the stateless `worker` service in the SQLite configuration.
 - Bearer authentication is optional; without `RELAYQ_API_KEY`, run only in a
   trusted demo environment. TLS, scoped identities, and rate limiting remain

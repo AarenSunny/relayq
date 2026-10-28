@@ -74,8 +74,12 @@ native client automatically reconnects with its last received event ID.
 
 The HTTP process polls for newly committed event IDs at 500 ms intervals. This
 keeps the MVP dependency-free and works across multiple processes sharing the
-database. A production adapter could replace polling with PostgreSQL `LISTEN /
-NOTIFY` or a dedicated event broker without changing the public protocol.
+database. If a slow client fills Node's response buffer, its stream stops
+polling and writing until the socket emits `drain`, then resumes after the last
+event already queued for that client. This bounds application-level writes per
+connection while preserving the durable event cursor. A production adapter
+could replace polling with PostgreSQL `LISTEN / NOTIFY` or a dedicated event
+broker without changing the public protocol.
 
 ## Trust boundaries
 
