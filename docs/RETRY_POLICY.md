@@ -34,6 +34,12 @@ dependency recovers.
 deterministic delays. A worker or operator may supply `retryDelayMs` when failing
 a job to override the computed delay for that single transition.
 
+All configured and operator-supplied delays use non-negative safe-integer
+milliseconds. RelayQ also rejects a delay when adding it to the current clock
+would exceed JavaScript's exactly representable integer range, before changing
+queue state. This protects SQLite scheduling timestamps from fractional or
+rounded values without imposing a shorter deployment-specific delay policy.
+
 Jobs move to the dead-letter view after the final failed attempt. Redriving one
 resets its attempt counter but preserves its configured retry policy.
 

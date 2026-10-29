@@ -16,6 +16,21 @@ function validateLeaseMs(leaseMs: number): void {
   }
 }
 
+function validateDelayMs(delayMs: number, label: string): void {
+  if (!Number.isSafeInteger(delayMs) || delayMs < 0) {
+    throw new Error(`${label} must be a non-negative safe integer`);
+  }
+}
+
+function scheduledAt(now: number, delayMs: number, label: string): number {
+  validateDelayMs(delayMs, label);
+  const timestamp = now + delayMs;
+  if (!Number.isSafeInteger(timestamp)) {
+    throw new Error(`${label} exceeds the safe timestamp range`);
+  }
+  return timestamp;
+}
+
 export class JobStore {
   private readonly db: DatabaseSync;
   private readonly clock: Clock;
@@ -102,18 +117,19 @@ export class JobStore {
     if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
       throw new Error("maxAttempts must be a positive integer");
     }
-    if (!Number.isFinite(delayMs) || delayMs < 0) throw new Error("delayMs must be non-negative");
-    if (!Number.isInteger(backoffBaseMs) || backoffBaseMs < 0) {
-      throw new Error("backoffBaseMs must be a non-negative integer");
+    validateDelayMs(delayMs, "delayMs");
+    if (!Number.isSafeInteger(backoffBaseMs) || backoffBaseMs < 0) {
+      throw new Error("backoffBaseMs must be a non-negative safe integer");
     }
-    if (!Number.isInteger(backoffMaxMs) || backoffMaxMs < backoffBaseMs) {
-      throw new Error("backoffMaxMs must be an integer at least as large as backoffBaseMs");
+    if (!Number.isSafeInteger(backoffMaxMs) || backoffMaxMs < backoffBaseMs) {
+      throw new Error("backoffMaxMs must be a safe integer at least as large as backoffBaseMs");
     }
     if (!Number.isFinite(backoffJitter) || backoffJitter < 0 || backoffJitter > 1) {
       throw new Error("backoffJitter must be between 0 and 1");
     }
 
     const now = this.clock();
+    const availableAt = scheduledAt(now, delayMs, "delayMs");
     const id = randomUUID();
     this.transaction(() => {
       this.db.prepare(`
@@ -123,7 +139,7 @@ export class JobStore {
           available_at, created_at, updated_at
         ) VALUES (?, ?, ?, 'queued', ?, ?, ?, ?, ?, 0, ?, ?, ?)
       `).run(id, input.type.trim(), JSON.stringify(input.payload ?? null), priority,
-        maxAttempts, backoffBaseMs, backoffMaxMs, backoffJitter, now + delayMs, now, now);
+        maxAttempts, backoffBaseMs, backoffMaxMs, backoffJitter, availableAt, now, now);
       this.recordEvent(id, "enqueued", null, "queued", null, {
         priority, delayMs, maxAttempts, backoffBaseMs, backoffMaxMs, backoffJitter,
       }, now);
@@ -273,9 +289,7 @@ export class JobStore {
 
   fail(id: string, workerId: string, error: string, retryDelayMs?: number): Job {
     if (!error?.trim()) throw new Error("error is required");
-    if (retryDelayMs !== undefined && (!Number.isFinite(retryDelayMs) || retryDelayMs < 0)) {
-      throw new Error("retryDelayMs must be non-negative");
-    }
+    if (retryDelayMs !== undefined) validateDelayMs(retryDelayMs, "retryDelayMs");
     const now = this.clock();
     return this.transaction(() => {
       const job = this.get(id);
@@ -285,13 +299,14 @@ export class JobStore {
       }
       const exhausted = job.attempts >= job.maxAttempts;
       const delayMs = exhausted ? 0 : retryDelayMs ?? this.retryDelay(job);
+      const availableAt = scheduledAt(now, delayMs, "retryDelayMs");
       const toStatus = exhausted ? "failed" : "queued";
       const change = this.db.prepare(`
         UPDATE jobs
         SET status = ?, error = ?, worker_id = NULL, lease_expires_at = NULL,
             available_at = ?, updated_at = ?
         WHERE id = ? AND status = 'running' AND worker_id = ? AND lease_expires_at > ?
-      `).run(toStatus, error.trim(), now + delayMs, now, id, workerId, now);
+      `).run(toStatus, error.trim(), availableAt, now, id, workerId, now);
       if (change.changes !== 1) {
         throw new Error("job lease is missing, expired, or owned by another worker");
       }
@@ -318,18 +333,19 @@ export class JobStore {
   }
 
   requeueFailed(id: string, delayMs = 0): Job {
-    if (!Number.isFinite(delayMs) || delayMs < 0) throw new Error("delayMs must be non-negative");
+    validateDelayMs(delayMs, "delayMs");
     const job = this.get(id);
     if (!job) throw new Error("job not found");
     if (job.status !== "failed") throw new Error("only failed jobs can be requeued");
     const now = this.clock();
+    const availableAt = scheduledAt(now, delayMs, "delayMs");
     return this.transaction(() => {
       this.db.prepare(`
         UPDATE jobs
         SET status = 'queued', attempts = 0, available_at = ?, worker_id = NULL,
             lease_expires_at = NULL, result = NULL, error = NULL, updated_at = ?
         WHERE id = ?
-      `).run(now + delayMs, now, id);
+      `).run(availableAt, now, id);
       this.recordEvent(id, "redriven", "failed", "queued", null, { delayMs }, now);
       return this.get(id)!;
     });
@@ -338,6 +354,7 @@ export class JobStore {
   requeueFailedMany(limit = 100, delayMs = 0): Job[] {
     this.validateBatch(limit, delayMs);
     const now = this.clock();
+    const availableAt = scheduledAt(now, delayMs, "delayMs");
     return this.transaction(() => {
       const rows = this.db.prepare(`
         SELECT id FROM jobs WHERE status = 'failed' ORDER BY updated_at ASC, id ASC LIMIT ?
@@ -348,7 +365,7 @@ export class JobStore {
           SET status = 'queued', attempts = 0, available_at = ?, worker_id = NULL,
               lease_expires_at = NULL, result = NULL, error = NULL, updated_at = ?
           WHERE id = ? AND status = 'failed'
-        `).run(now + delayMs, now, row.id);
+        `).run(availableAt, now, row.id);
         this.recordEvent(row.id, "redriven", "failed", "queued", null, { delayMs, bulk: true }, now);
       }
       return rows.map((row) => this.get(row.id)!);
@@ -423,7 +440,7 @@ export class JobStore {
     if (!Number.isInteger(limit) || limit < 1 || limit > 1_000) {
       throw new Error("limit must be between 1 and 1000");
     }
-    if (!Number.isFinite(delayMs) || delayMs < 0) throw new Error("delayMs must be non-negative");
+    validateDelayMs(delayMs, "delayMs");
   }
 
   private ensureColumn(name: string, definition: string): void {

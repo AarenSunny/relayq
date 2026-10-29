@@ -149,6 +149,50 @@ test("invalid lease durations are rejected before queue state changes", () => {
   store.close();
 });
 
+test("scheduling delays require exactly representable whole milliseconds", () => {
+  let now = 27_000;
+  const store = new JobStore(":memory:", () => now);
+  for (const delayMs of [0.5, Number.MAX_VALUE, Number.MAX_SAFE_INTEGER]) {
+    assert.throws(
+      () => store.enqueue({ type: "invalid-delay", delayMs }),
+      /delayMs must be a non-negative safe integer|delayMs exceeds the safe timestamp range/,
+    );
+  }
+  assert.equal(store.stats().total, 0);
+  assert.throws(
+    () => store.enqueue({ type: "invalid-backoff", backoffBaseMs: 1.5 }),
+    /backoffBaseMs must be a non-negative safe integer/,
+  );
+  assert.throws(
+    () => store.enqueue({ type: "invalid-backoff", backoffMaxMs: Number.MAX_VALUE }),
+    /backoffMaxMs must be a safe integer/,
+  );
+
+  const job = store.enqueue({ type: "bounded-retry", maxAttempts: 2 });
+  store.claim("worker-a");
+  assert.throws(
+    () => store.fail(job.id, "worker-a", "retry later", 0.5),
+    /retryDelayMs must be a non-negative safe integer/,
+  );
+  assert.equal(store.get(job.id)?.status, "running");
+  assert.equal(store.listEvents(job.id).at(-1)?.type, "claimed");
+
+  store.fail(job.id, "worker-a", "retry now", 0);
+  store.claim("worker-b");
+  store.fail(job.id, "worker-b", "permanent failure");
+  assert.throws(
+    () => store.requeueFailed(job.id, 0.5),
+    /delayMs must be a non-negative safe integer/,
+  );
+  assert.equal(store.get(job.id)?.status, "failed");
+  assert.throws(
+    () => store.requeueFailedMany(1, Number.MAX_SAFE_INTEGER),
+    /delayMs exceeds the safe timestamp range/,
+  );
+  assert.equal(store.get(job.id)?.status, "failed");
+  store.close();
+});
+
 test("an operator can requeue a dead-lettered job with a fresh attempt budget", () => {
   let now = 30_000;
   const store = new JobStore(":memory:", () => now);

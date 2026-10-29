@@ -16,6 +16,8 @@ The oldest failed jobs are selected first. Each selected job keeps its ID and
 retry policy, resets its attempt counter, clears its error, and receives its own
 `redriven` lifecycle event with `bulk: true`. The hard limit of 1,000 jobs per
 request prevents a redrive from monopolizing the SQLite writer.
+Delay values are whole, non-negative, safely representable milliseconds; an
+invalid delay rejects the entire request before any selected job changes.
 
 ## Retention cleanup
 
