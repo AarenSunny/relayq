@@ -61,9 +61,14 @@ export function streamEvents(
 
   function publish(): void {
     if (closed || blocked) return;
-    for (const event of store.listEvents(undefined, cursor, 100)) {
-      cursor = event.id;
-      if (!write(`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`)) break;
+    try {
+      for (const event of store.listEvents(undefined, cursor, 100)) {
+        cursor = event.id;
+        if (!write(`id: ${event.id}\ndata: ${JSON.stringify(event)}\n\n`)) break;
+      }
+    } catch {
+      cleanup();
+      response.end();
     }
   }
 

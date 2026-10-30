@@ -61,3 +61,38 @@ test("event streams pause at backpressure and resume from the durable cursor", (
   assert.deepEqual(cursors, [0, 1]);
   assert.equal(response.writes.length, 3);
 });
+
+test("event streams close cleanly when durable event reads fail", () => {
+  const request = new EventEmitter() as EventEmitter & { headers: Record<string, string> };
+  request.headers = {};
+  const response = new EventEmitter() as EventEmitter & {
+    ended: boolean;
+    writeHead: (status: number, headers: Record<string, string>) => void;
+    write: (chunk: string) => boolean;
+    end: () => void;
+  };
+  response.ended = false;
+  response.writeHead = () => {};
+  response.write = () => true;
+  response.end = () => { response.ended = true; };
+
+  let reads = 0;
+  const store = {
+    listEvents: () => {
+      reads += 1;
+      throw new Error("SQLite unavailable");
+    },
+  } as unknown as JobStore;
+
+  assert.doesNotThrow(() => streamEvents(
+    request as IncomingMessage,
+    response as unknown as ServerResponse,
+    store,
+    new URL("http://relayq.local/events/stream"),
+  ));
+  assert.equal(reads, 1);
+  assert.equal(response.ended, true);
+
+  response.emit("drain");
+  assert.equal(reads, 1);
+});

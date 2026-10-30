@@ -81,6 +81,13 @@ connection while preserving the durable event cursor. A production adapter
 could replace polling with PostgreSQL `LISTEN / NOTIFY` or a dedicated event
 broker without changing the public protocol.
 
+If a later SQLite event read fails after the route handler has returned, the
+stream clears its polling and keepalive timers and ends that client response
+instead of throwing from the interval callback. The browser can reconnect from
+its last delivered event ID once storage recovers. This contains an asynchronous
+read failure; it does not provide outage backoff or replace readiness-based
+traffic gating.
+
 ## Trust boundaries
 
 The MVP is intended for a trusted local network. An optional bearer token uses
