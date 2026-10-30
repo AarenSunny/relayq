@@ -220,6 +220,7 @@ export class JobStore {
     validateLeaseMs(leaseMs);
 
     const now = this.clock();
+    const leaseExpiresAt = scheduledAt(now, leaseMs, "leaseMs");
     this.db.exec("BEGIN IMMEDIATE");
     try {
       this.recoverExpiredLeases(now);
@@ -244,7 +245,7 @@ export class JobStore {
         SET status = 'running', worker_id = ?, lease_expires_at = ?,
             attempts = attempts + 1, updated_at = ?
         WHERE id = ? AND status = 'queued'
-      `).run(workerId.trim(), now + leaseMs, now, candidate.id);
+      `).run(workerId.trim(), leaseExpiresAt, now, candidate.id);
       this.recordEvent(candidate.id, "claimed", "queued", "running", workerId.trim(), { leaseMs }, now);
       this.db.exec("COMMIT");
       return this.get(candidate.id);
@@ -275,12 +276,13 @@ export class JobStore {
     if (!workerId?.trim()) throw new Error("workerId is required");
     validateLeaseMs(leaseMs);
     const now = this.clock();
+    const leaseExpiresAt = scheduledAt(now, leaseMs, "leaseMs");
     return this.transaction(() => {
       const change = this.db.prepare(`
         UPDATE jobs
         SET lease_expires_at = ?, updated_at = ?
         WHERE id = ? AND status = 'running' AND worker_id = ? AND lease_expires_at > ?
-      `).run(now + leaseMs, now, id, workerId.trim(), now);
+      `).run(leaseExpiresAt, now, id, workerId.trim(), now);
       if (change.changes !== 1) throw new Error("job lease is missing, expired, or owned by another worker");
       this.recordEvent(id, "lease_renewed", "running", "running", workerId.trim(), { leaseMs }, now);
       return this.get(id)!;

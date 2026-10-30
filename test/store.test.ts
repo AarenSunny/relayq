@@ -149,6 +149,34 @@ test("invalid lease durations are rejected before queue state changes", () => {
   store.close();
 });
 
+test("lease expirations must remain exactly representable timestamps", () => {
+  let now = Number.MAX_SAFE_INTEGER - 500;
+  const claimStore = new JobStore(":memory:", () => now);
+  const queued = claimStore.enqueue({ type: "bounded-lease-timestamp" });
+  assert.throws(
+    () => claimStore.claim("worker-a", 1_000),
+    /leaseMs exceeds the safe timestamp range/,
+  );
+  assert.deepEqual(
+    { status: claimStore.get(queued.id)?.status, attempts: claimStore.get(queued.id)?.attempts },
+    { status: "queued", attempts: 0 },
+  );
+  claimStore.close();
+
+  now = 30_000;
+  const renewalStore = new JobStore(":memory:", () => now);
+  const running = renewalStore.enqueue({ type: "bounded-renewal-timestamp" });
+  const claimed = renewalStore.claim("worker-a", 1_000)!;
+  now = Number.MAX_SAFE_INTEGER - 500;
+  assert.throws(
+    () => renewalStore.renewLease(running.id, "worker-a", 1_000),
+    /leaseMs exceeds the safe timestamp range/,
+  );
+  assert.equal(renewalStore.get(running.id)?.leaseExpiresAt, claimed.leaseExpiresAt);
+  assert.equal(renewalStore.listEvents(running.id).at(-1)?.type, "claimed");
+  renewalStore.close();
+});
+
 test("scheduling delays require exactly representable whole milliseconds", () => {
   let now = 27_000;
   const store = new JobStore(":memory:", () => now);
