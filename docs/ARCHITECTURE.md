@@ -37,9 +37,11 @@ idempotent, usually by storing the job ID with the side effect.
 
 Claims use a short `BEGIN IMMEDIATE` transaction. SQLite permits many readers
 but serializes writers, so two control-plane processes cannot lease the same
-job. WAL mode keeps reads available while a writer commits. This is appropriate
-for the single-host MVP; a later PostgreSQL adapter will use `FOR UPDATE SKIP
-LOCKED` for horizontal control-plane scaling.
+job. Cancellation acquires the same writer lock before checking job state, so
+a stale operator request cannot overwrite a completion committed by another
+process. WAL mode keeps reads available while a writer commits. This is
+appropriate for the single-host MVP; a later PostgreSQL adapter will use `FOR
+UPDATE SKIP LOCKED` for horizontal control-plane scaling.
 
 ## Queue ordering
 

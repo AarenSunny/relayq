@@ -319,16 +319,17 @@ export class JobStore {
   }
 
   cancel(id: string): Job {
-    const job = this.get(id);
-    if (!job) throw new Error("job not found");
-    if (TERMINAL_STATUSES.has(job.status)) throw new Error("job is already terminal");
-    const now = this.clock();
     return this.transaction(() => {
-      this.db.prepare(`
+      const job = this.get(id);
+      if (!job) throw new Error("job not found");
+      if (TERMINAL_STATUSES.has(job.status)) throw new Error("job is already terminal");
+      const now = this.clock();
+      const change = this.db.prepare(`
         UPDATE jobs
         SET status = 'cancelled', worker_id = NULL, lease_expires_at = NULL, updated_at = ?
-        WHERE id = ?
+        WHERE id = ? AND status IN ('queued', 'running')
       `).run(now, id);
+      if (change.changes !== 1) throw new Error("job is already terminal");
       this.recordEvent(id, "cancelled", job.status, "cancelled", job.workerId, {}, now);
       return this.get(id)!;
     });

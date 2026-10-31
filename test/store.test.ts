@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { JobStore } from "../src/store.ts";
+
+type TransactionRunner = <T>(operation: () => T) => T;
 
 test("readiness reflects SQLite availability", () => {
   const store = new JobStore(":memory:");
@@ -239,6 +244,35 @@ test("an operator can requeue a dead-lettered job with a fresh attempt budget", 
   now += 1;
   assert.equal(store.claim("worker-b")?.id, job.id);
   store.close();
+});
+
+test("cancellation cannot overwrite a concurrent completion", () => {
+  const directory = mkdtempSync(join(tmpdir(), "relayq-cancel-race-"));
+  const filename = join(directory, "queue.db");
+  const operator = new JobStore(filename);
+  const worker = new JobStore(filename);
+  try {
+    const job = operator.enqueue({ type: "terminal-race" });
+    operator.claim("worker-a");
+
+    const internals = operator as unknown as { transaction: TransactionRunner };
+    const originalTransaction = internals.transaction.bind(operator) as TransactionRunner;
+    internals.transaction = <T>(operation: () => T): T => {
+      worker.complete(job.id, "worker-a", "finished");
+      internals.transaction = originalTransaction;
+      return originalTransaction(operation);
+    };
+
+    assert.throws(() => operator.cancel(job.id), /job is already terminal/);
+    assert.equal(operator.get(job.id)?.status, "succeeded");
+    assert.deepEqual(operator.listEvents(job.id).map((event) => event.type), [
+      "enqueued", "claimed", "completed",
+    ]);
+  } finally {
+    operator.close();
+    worker.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("event cursors return only newer state transitions", () => {
