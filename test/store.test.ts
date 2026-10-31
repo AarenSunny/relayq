@@ -246,6 +246,36 @@ test("an operator can requeue a dead-lettered job with a fresh attempt budget", 
   store.close();
 });
 
+test("concurrent single-job redrives produce one transition and preserve its delay", () => {
+  const directory = mkdtempSync(join(tmpdir(), "relayq-redrive-race-"));
+  const filename = join(directory, "queue.db");
+  const operator = new JobStore(filename, () => 10_000);
+  const competingOperator = new JobStore(filename, () => 20_000);
+  try {
+    const job = operator.enqueue({ type: "redrive-race", maxAttempts: 1 });
+    operator.claim("worker-a");
+    operator.fail(job.id, "worker-a", "planned failure");
+
+    const internals = operator as unknown as { transaction: TransactionRunner };
+    const originalTransaction = internals.transaction.bind(operator) as TransactionRunner;
+    internals.transaction = <T>(operation: () => T): T => {
+      competingOperator.requeueFailed(job.id, 5_000);
+      internals.transaction = originalTransaction;
+      return originalTransaction(operation);
+    };
+
+    assert.throws(() => operator.requeueFailed(job.id), /only failed jobs can be requeued/);
+    assert.equal(operator.get(job.id)?.availableAt, 25_000);
+    assert.deepEqual(operator.listEvents(job.id).map((event) => event.type), [
+      "enqueued", "claimed", "dead_lettered", "redriven",
+    ]);
+  } finally {
+    operator.close();
+    competingOperator.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("cancellation cannot overwrite a concurrent completion", () => {
   const directory = mkdtempSync(join(tmpdir(), "relayq-cancel-race-"));
   const filename = join(directory, "queue.db");

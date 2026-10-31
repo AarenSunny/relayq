@@ -39,9 +39,11 @@ Claims use a short `BEGIN IMMEDIATE` transaction. SQLite permits many readers
 but serializes writers, so two control-plane processes cannot lease the same
 job. Cancellation acquires the same writer lock before checking job state, so
 a stale operator request cannot overwrite a completion committed by another
-process. WAL mode keeps reads available while a writer commits. This is
-appropriate for the single-host MVP; a later PostgreSQL adapter will use `FOR
-UPDATE SKIP LOCKED` for horizontal control-plane scaling.
+process. Single-job dead-letter redrive also validates and changes state under
+that lock, preventing concurrent operators from recording duplicate redrives
+or overwriting the selected delay. WAL mode keeps reads available while a
+writer commits. This is appropriate for the single-host MVP; a later PostgreSQL
+adapter will use `FOR UPDATE SKIP LOCKED` for horizontal control-plane scaling.
 
 ## Queue ordering
 

@@ -337,18 +337,19 @@ export class JobStore {
 
   requeueFailed(id: string, delayMs = 0): Job {
     validateDelayMs(delayMs, "delayMs");
-    const job = this.get(id);
-    if (!job) throw new Error("job not found");
-    if (job.status !== "failed") throw new Error("only failed jobs can be requeued");
-    const now = this.clock();
-    const availableAt = scheduledAt(now, delayMs, "delayMs");
     return this.transaction(() => {
-      this.db.prepare(`
+      const job = this.get(id);
+      if (!job) throw new Error("job not found");
+      if (job.status !== "failed") throw new Error("only failed jobs can be requeued");
+      const now = this.clock();
+      const availableAt = scheduledAt(now, delayMs, "delayMs");
+      const change = this.db.prepare(`
         UPDATE jobs
         SET status = 'queued', attempts = 0, available_at = ?, worker_id = NULL,
             lease_expires_at = NULL, result = NULL, error = NULL, updated_at = ?
-        WHERE id = ?
+        WHERE id = ? AND status = 'failed'
       `).run(availableAt, now, id);
+      if (change.changes !== 1) throw new Error("only failed jobs can be requeued");
       this.recordEvent(id, "redriven", "failed", "queued", null, { delayMs }, now);
       return this.get(id)!;
     });
