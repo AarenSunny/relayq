@@ -40,6 +40,10 @@ would exceed JavaScript's exactly representable integer range, before changing
 queue state. This protects SQLite scheduling timestamps from fractional or
 rounded values without imposing a shorter deployment-specific delay policy.
 
+`maxAttempts` must be a whole number from 1 through 1,000. The enqueue boundary
+rejects larger budgets before writing the job, preventing one request from
+creating an effectively unbounded retry policy.
+
 Jobs move to the dead-letter view after the final failed attempt. Redriving one
 resets its attempt counter but preserves its configured retry policy.
 

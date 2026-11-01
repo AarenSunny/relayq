@@ -9,6 +9,7 @@ type JobRow = Record<string, unknown>;
 const TERMINAL_STATUSES = new Set<JobStatus>(["succeeded", "failed", "cancelled"]);
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 2_147_483_647;
+const MAX_ATTEMPTS = 1_000;
 
 function validateLeaseMs(leaseMs: number): void {
   if (!Number.isSafeInteger(leaseMs) || leaseMs < MIN_LEASE_MS || leaseMs > MAX_LEASE_MS) {
@@ -113,9 +114,9 @@ export class JobStore {
     const backoffBaseMs = input.backoffBaseMs ?? 1_000;
     const backoffMaxMs = input.backoffMaxMs ?? 60_000;
     const backoffJitter = input.backoffJitter ?? 0.2;
-    if (!Number.isInteger(priority)) throw new Error("priority must be an integer");
-    if (!Number.isInteger(maxAttempts) || maxAttempts < 1) {
-      throw new Error("maxAttempts must be a positive integer");
+    if (!Number.isSafeInteger(priority)) throw new Error("priority must be a safe integer");
+    if (!Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > MAX_ATTEMPTS) {
+      throw new Error(`maxAttempts must be an integer between 1 and ${MAX_ATTEMPTS}`);
     }
     validateDelayMs(delayMs, "delayMs");
     if (!Number.isSafeInteger(backoffBaseMs) || backoffBaseMs < 0) {

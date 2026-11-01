@@ -226,6 +226,33 @@ test("scheduling delays require exactly representable whole milliseconds", () =>
   store.close();
 });
 
+test("enqueue bounds durable priority values and retry budgets", () => {
+  const store = new JobStore(":memory:");
+  for (const priority of [0.5, Number.MAX_VALUE, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(
+      () => store.enqueue({ type: "invalid-priority", priority }),
+      /priority must be a safe integer/,
+    );
+  }
+  for (const maxAttempts of [0, 1.5, 1_001, Number.MAX_VALUE]) {
+    assert.throws(
+      () => store.enqueue({ type: "invalid-budget", maxAttempts }),
+      /maxAttempts must be an integer between 1 and 1000/,
+    );
+  }
+  assert.equal(store.stats().total, 0);
+  assert.equal(store.listEvents().length, 0);
+
+  const bounded = store.enqueue({
+    type: "bounded-input",
+    priority: Number.MAX_SAFE_INTEGER,
+    maxAttempts: 1_000,
+  });
+  assert.equal(bounded.priority, Number.MAX_SAFE_INTEGER);
+  assert.equal(bounded.maxAttempts, 1_000);
+  store.close();
+});
+
 test("an operator can requeue a dead-lettered job with a fresh attempt budget", () => {
   let now = 30_000;
   const store = new JobStore(":memory:", () => now);

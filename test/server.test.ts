@@ -58,13 +58,25 @@ test("job lifecycle is available over HTTP", async () => {
 });
 
 test("invalid jobs return a useful client error", async () => {
-  const response = await fetch(`${baseUrl}/jobs`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ payload: "missing type" }),
-  });
-  assert.equal(response.status, 409);
-  assert.match((await response.json() as { error: string }).error, /type is required/);
+  const before = await fetch(`${baseUrl}/stats`).then((response) => response.json()) as { total: number };
+  const cases = [
+    [{ payload: "missing type" }, /type is required/],
+    [{ type: "unsafe-priority", priority: Number.MAX_SAFE_INTEGER + 1 }, /priority must be a safe integer/],
+    [{ type: "unbounded-retries", maxAttempts: 1_001 }, /maxAttempts must be an integer between 1 and 1000/],
+  ] as const;
+
+  for (const [body, expectedError] of cases) {
+    const response = await fetch(`${baseUrl}/jobs`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    assert.equal(response.status, 409);
+    assert.match((await response.json() as { error: string }).error, expectedError);
+  }
+
+  const after = await fetch(`${baseUrl}/stats`).then((response) => response.json()) as { total: number };
+  assert.equal(after.total, before.total);
 });
 
 test("readiness distinguishes the HTTP process from SQLite availability", async () => {
