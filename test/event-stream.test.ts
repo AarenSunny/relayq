@@ -62,6 +62,35 @@ test("event streams pause at backpressure and resume from the durable cursor", (
   assert.equal(response.writes.length, 3);
 });
 
+test("event streams do not pass imprecise cursors to durable storage", () => {
+  const request = new EventEmitter() as EventEmitter & { headers: Record<string, string> };
+  request.headers = { "last-event-id": String(Number.MAX_SAFE_INTEGER + 1) };
+  const response = new EventEmitter() as EventEmitter & {
+    writeHead: (status: number, headers: Record<string, string>) => void;
+    write: (chunk: string) => boolean;
+  };
+  response.writeHead = () => {};
+  response.write = () => true;
+
+  const cursors: number[] = [];
+  const store = {
+    listEvents: (_jobId: string | undefined, afterId: number) => {
+      cursors.push(afterId);
+      return [];
+    },
+  } as unknown as JobStore;
+
+  streamEvents(
+    request as IncomingMessage,
+    response as unknown as ServerResponse,
+    store,
+    new URL("http://relayq.local/events/stream"),
+  );
+
+  assert.deepEqual(cursors, [0]);
+  request.emit("close");
+});
+
 test("event streams close cleanly when durable event reads fail", () => {
   const request = new EventEmitter() as EventEmitter & { headers: Record<string, string> };
   request.headers = {};

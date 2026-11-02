@@ -334,6 +334,12 @@ test("cancellation cannot overwrite a concurrent completion", () => {
 
 test("event cursors return only newer state transitions", () => {
   const store = new JobStore(":memory:");
+  for (const cursor of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, Number.MAX_VALUE]) {
+    assert.throws(
+      () => store.listEvents(undefined, cursor),
+      /afterId must be a non-negative safe integer/,
+    );
+  }
   const job = store.enqueue({ type: "sum" });
   const firstEvent = store.listEvents(job.id)[0];
   store.claim("worker-a");

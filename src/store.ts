@@ -164,7 +164,9 @@ export class JobStore {
   }
 
   listEvents(jobId?: string, afterId = 0, limit = 100): JobEvent[] {
-    if (!Number.isInteger(afterId) || afterId < 0) throw new Error("afterId must be non-negative");
+    if (!Number.isSafeInteger(afterId) || afterId < 0) {
+      throw new Error("afterId must be a non-negative safe integer");
+    }
     if (!Number.isInteger(limit) || limit < 1 || limit > 1000) {
       throw new Error("limit must be between 1 and 1000");
     }

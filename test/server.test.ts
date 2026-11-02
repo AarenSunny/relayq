@@ -156,6 +156,13 @@ test("dashboard and durable event history are exposed", async () => {
   assert.ok(body.events.length >= 6);
   assert.ok(body.events.some((event) => event.type === "completed"));
   assert.ok(body.events.every((event, index) => index === 0 || body.events[index - 1].id < event.id));
+
+  const unsafeCursor = await fetch(`${baseUrl}/events?after=${Number.MAX_SAFE_INTEGER + 1}`);
+  assert.equal(unsafeCursor.status, 409);
+  assert.match(
+    (await unsafeCursor.json() as { error: string }).error,
+    /afterId must be a non-negative safe integer/,
+  );
 });
 
 test("HTTP workers inherit the producer's retry policy", async () => {

@@ -35,7 +35,7 @@ export function streamEvents(
     ? request.headers["last-event-id"][0]
     : request.headers["last-event-id"];
   let cursor = Number(headerCursor ?? url.searchParams.get("after") ?? 0);
-  if (!Number.isInteger(cursor) || cursor < 0) cursor = 0;
+  if (!Number.isSafeInteger(cursor) || cursor < 0) cursor = 0;
   response.writeHead(200, {
     "content-type": "text/event-stream",
     "cache-control": "no-cache, no-transform",

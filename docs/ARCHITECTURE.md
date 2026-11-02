@@ -76,6 +76,12 @@ queries and reconnectable streaming. The dashboard uses Server-Sent Events
 rather than WebSockets because updates flow in one direction and the browser's
 native client automatically reconnects with its last received event ID.
 
+Polling cursors must be non-negative safe integers, so a JavaScript client
+cannot silently round an event ID before SQLite compares it. SSE applies the
+same exactness boundary and treats a malformed or imprecise reconnect cursor as
+zero, resuming from the latest bounded event window. This protects cursor
+ordering; it does not detect events removed by a retention policy.
+
 The HTTP process polls for newly committed event IDs at 500 ms intervals. This
 keeps the MVP dependency-free and works across multiple processes sharing the
 database. If a slow client fills Node's response buffer, its stream stops
