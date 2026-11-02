@@ -63,6 +63,12 @@ test("invalid jobs return a useful client error", async () => {
     [{ payload: "missing type" }, /type is required/],
     [{ type: "unsafe-priority", priority: Number.MAX_SAFE_INTEGER + 1 }, /priority must be a safe integer/],
     [{ type: "unbounded-retries", maxAttempts: 1_001 }, /maxAttempts must be an integer between 1 and 1000/],
+    [{
+      type: "unsafe-jitter",
+      backoffBaseMs: Math.floor(Number.MAX_SAFE_INTEGER / 2) + 1,
+      backoffMaxMs: Math.floor(Number.MAX_SAFE_INTEGER / 2) + 1,
+      backoffJitter: 1,
+    }, /backoffMaxMs with jitter exceeds the safe integer range/],
   ] as const;
 
   for (const [body, expectedError] of cases) {

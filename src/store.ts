@@ -128,6 +128,9 @@ export class JobStore {
     if (!Number.isFinite(backoffJitter) || backoffJitter < 0 || backoffJitter > 1) {
       throw new Error("backoffJitter must be between 0 and 1");
     }
+    if (backoffMaxMs > Number.MAX_SAFE_INTEGER / (1 + backoffJitter)) {
+      throw new Error("backoffMaxMs with jitter exceeds the safe integer range");
+    }
 
     const now = this.clock();
     const availableAt = scheduledAt(now, delayMs, "delayMs");

@@ -35,10 +35,13 @@ deterministic delays. A worker or operator may supply `retryDelayMs` when failin
 a job to override the computed delay for that single transition.
 
 All configured and operator-supplied delays use non-negative safe-integer
-milliseconds. RelayQ also rejects a delay when adding it to the current clock
-would exceed JavaScript's exactly representable integer range, before changing
-queue state. This protects SQLite scheduling timestamps from fractional or
-rounded values without imposing a shorter deployment-specific delay policy.
+milliseconds. Enqueue also checks the maximum delay after positive jitter, so a
+newly stored policy cannot later produce an imprecise retry delay. RelayQ
+rejects a delay when adding it to the current clock would exceed JavaScript's
+exactly representable integer range, before changing queue state. These checks
+protect SQLite scheduling timestamps from fractional or rounded values without
+imposing a shorter deployment-specific delay policy. This enqueue boundary does
+not revalidate rows written by older binaries or direct database edits.
 
 `maxAttempts` must be a whole number from 1 through 1,000. The enqueue boundary
 rejects larger budgets before writing the job, preventing one request from

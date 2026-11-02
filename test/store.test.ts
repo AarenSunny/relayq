@@ -253,6 +253,37 @@ test("enqueue bounds durable priority values and retry budgets", () => {
   store.close();
 });
 
+test("enqueue bounds the maximum jittered retry delay", () => {
+  const store = new JobStore(":memory:", () => 0, () => 1);
+  const maximumBeforeJitter = Math.floor(Number.MAX_SAFE_INTEGER / 2);
+  assert.throws(
+    () => store.enqueue({
+      type: "unsafe-jitter",
+      backoffBaseMs: maximumBeforeJitter + 1,
+      backoffMaxMs: maximumBeforeJitter + 1,
+      backoffJitter: 1,
+    }),
+    /backoffMaxMs with jitter exceeds the safe integer range/,
+  );
+  assert.equal(store.stats().total, 0);
+  assert.equal(store.listEvents().length, 0);
+
+  const job = store.enqueue({
+    type: "bounded-jitter",
+    backoffBaseMs: maximumBeforeJitter,
+    backoffMaxMs: maximumBeforeJitter,
+    backoffJitter: 1,
+  });
+  store.claim("worker");
+  const retried = store.fail(job.id, "worker", "retry at the exact boundary");
+  assert.equal(retried.availableAt, maximumBeforeJitter * 2);
+  assert.equal(
+    store.listEvents(job.id).at(-1)?.detail.retryDelayMs,
+    maximumBeforeJitter * 2,
+  );
+  store.close();
+});
+
 test("an operator can requeue a dead-lettered job with a fresh attempt budget", () => {
   let now = 30_000;
   const store = new JobStore(":memory:", () => now);
