@@ -32,6 +32,15 @@ function scheduledAt(now: number, delayMs: number, label: string): number {
   return timestamp;
 }
 
+function retentionCutoff(now: number, olderThanMs: number): number {
+  validateDelayMs(olderThanMs, "olderThanMs");
+  const timestamp = now - olderThanMs;
+  if (!Number.isSafeInteger(timestamp)) {
+    throw new Error("olderThanMs exceeds the safe timestamp range");
+  }
+  return timestamp;
+}
+
 export class JobStore {
   private readonly db: DatabaseSync;
   private readonly clock: Clock;
@@ -383,13 +392,10 @@ export class JobStore {
   }
 
   purgeTerminal(olderThanMs: number, limit = 1_000, includeFailed = false): { deleted: number; jobIds: string[] } {
-    if (!Number.isFinite(olderThanMs) || olderThanMs < 0) {
-      throw new Error("olderThanMs must be non-negative");
-    }
     if (!Number.isInteger(limit) || limit < 1 || limit > 10_000) {
       throw new Error("limit must be between 1 and 10000");
     }
-    const cutoff = this.clock() - olderThanMs;
+    const cutoff = retentionCutoff(this.clock(), olderThanMs);
     return this.transaction(() => {
       const statusSql = includeFailed
         ? "status IN ('succeeded', 'cancelled', 'failed')"

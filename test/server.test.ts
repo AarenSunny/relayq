@@ -258,6 +258,17 @@ test("bulk administration redrives and purges bounded batches", async () => {
   }).then((response) => response.json()) as { redriven: number };
   assert.equal(redrive.redriven, 1);
 
+  const invalidPurge = await fetch(`${baseUrl}/admin/purge`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ olderThanMs: 0.5, limit: 100 }),
+  });
+  assert.equal(invalidPurge.status, 409);
+  assert.match(
+    (await invalidPurge.json() as { error: string }).error,
+    /olderThanMs must be a non-negative safe integer/,
+  );
+
   const purge = await fetch(`${baseUrl}/admin/purge`, {
     method: "POST",
     headers: { "content-type": "application/json" },

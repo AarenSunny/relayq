@@ -492,3 +492,27 @@ test("retention removes only eligible terminal jobs and cascades events", () => 
   assert.equal(store.get(queued.id)?.status, "queued");
   store.close();
 });
+
+test("retention rejects imprecise ages before deleting terminal jobs", () => {
+  const store = new JobStore(":memory:", () => 100_000);
+  const job = store.enqueue({ type: "retain-on-invalid-cutoff" });
+  store.claim("worker");
+  store.complete(job.id, "worker");
+
+  for (const olderThanMs of [-1, 0.5, Number.MAX_SAFE_INTEGER + 1, Number.MAX_VALUE]) {
+    assert.throws(
+      () => store.purgeTerminal(olderThanMs),
+      /olderThanMs must be a non-negative safe integer/,
+    );
+    assert.equal(store.get(job.id)?.status, "succeeded");
+    assert.equal(store.listEvents(job.id).at(-1)?.type, "completed");
+  }
+  store.close();
+
+  const boundaryStore = new JobStore(":memory:", () => -Number.MAX_SAFE_INTEGER);
+  assert.throws(
+    () => boundaryStore.purgeTerminal(1),
+    /olderThanMs exceeds the safe timestamp range/,
+  );
+  boundaryStore.close();
+});

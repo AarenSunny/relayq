@@ -35,7 +35,11 @@ its lifecycle events through a foreign-key cascade.
 
 The response lists deleted job IDs so an operator can record what happened.
 Each request is capped at 10,000 records; repeat the call for larger retention
-backlogs.
+backlogs. `olderThanMs` must be a whole, non-negative, safely representable
+millisecond duration, and the resulting cutoff timestamp must also remain exact.
+Invalid retention boundaries fail before the deletion transaction begins. This
+validation does not provide a dry run or protect against an operator choosing
+the wrong otherwise-valid retention window.
 
 ## Safe maintenance sequence
 
