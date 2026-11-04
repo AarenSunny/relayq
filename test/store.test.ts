@@ -126,6 +126,28 @@ test("a worker can renew its lease but another worker cannot", () => {
   store.close();
 });
 
+test("worker identity normalization is consistent across lease mutations", () => {
+  const store = new JobStore(":memory:");
+  const completed = store.enqueue({ type: "normalized-completion" });
+  assert.equal(store.claim("  worker-a  ")?.workerId, "worker-a");
+  assert.equal(store.renewLease(completed.id, " worker-a ").workerId, "worker-a");
+  assert.equal(store.complete(completed.id, " worker-a ").status, "succeeded");
+  assert.deepEqual(
+    store.listEvents(completed.id).map((event) => event.workerId),
+    [null, "worker-a", "worker-a", "worker-a"],
+  );
+
+  const failed = store.enqueue({ type: "normalized-failure", maxAttempts: 1 });
+  assert.equal(store.claim(" worker-b ")?.workerId, "worker-b");
+  assert.equal(store.fail(failed.id, " worker-b ", "planned failure").status, "failed");
+  assert.deepEqual(
+    store.listEvents(failed.id).map((event) => event.workerId),
+    [null, "worker-b", "worker-b"],
+  );
+  assert.throws(() => store.claim("   "), /workerId is required/);
+  store.close();
+});
+
 test("invalid lease durations are rejected before queue state changes", () => {
   let now = 25_000;
   const store = new JobStore(":memory:", () => now);

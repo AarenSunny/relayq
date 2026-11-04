@@ -27,6 +27,9 @@ The built-in key is intentionally a small deployment primitive, not a complete
 identity system. Read endpoints remain accessible so the bundled dashboard and
 health probes work without storing credentials in browser code. Do not expose
 payloads or results containing sensitive data under this model.
+Worker IDs are normalized operational labels used for lease ownership, not
+authenticated principals; possession of the shared bearer token permits any
+worker label.
 
 An internet-facing deployment still needs TLS termination, secret rotation,
 per-client identities, authorization scopes, rate limiting, and audit logs for

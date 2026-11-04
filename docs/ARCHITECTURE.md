@@ -20,6 +20,8 @@ Completion and failure acknowledgements include the worker identity and an
 unexpired-lease condition in the same SQLite update. A late worker therefore
 cannot commit stale output during the gap between its deadline and lease
 recovery by another claim.
+Worker IDs are trimmed once at every lease mutation, so claims, renewals, and
+terminal acknowledgements compare and record the same canonical label.
 Before either terminal acknowledgement, the worker stops its heartbeat timer
 and awaits any renewal already in flight. This keeps one worker from racing its
 own renewal against completion or failure. Control-plane requests have a bounded

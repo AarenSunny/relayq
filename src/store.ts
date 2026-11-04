@@ -11,6 +11,12 @@ const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 2_147_483_647;
 const MAX_ATTEMPTS = 1_000;
 
+function normalizeWorkerId(workerId: string): string {
+  const normalized = workerId?.trim();
+  if (!normalized) throw new Error("workerId is required");
+  return normalized;
+}
+
 function validateLeaseMs(leaseMs: number): void {
   if (!Number.isSafeInteger(leaseMs) || leaseMs < MIN_LEASE_MS || leaseMs > MAX_LEASE_MS) {
     throw new Error(`leaseMs must be an integer between ${MIN_LEASE_MS} and ${MAX_LEASE_MS}`);
@@ -231,7 +237,7 @@ export class JobStore {
   }
 
   claim(workerId: string, leaseMs = 30_000): Job | null {
-    if (!workerId?.trim()) throw new Error("workerId is required");
+    const owner = normalizeWorkerId(workerId);
     validateLeaseMs(leaseMs);
 
     const now = this.clock();
@@ -260,8 +266,8 @@ export class JobStore {
         SET status = 'running', worker_id = ?, lease_expires_at = ?,
             attempts = attempts + 1, updated_at = ?
         WHERE id = ? AND status = 'queued'
-      `).run(workerId.trim(), leaseExpiresAt, now, candidate.id);
-      this.recordEvent(candidate.id, "claimed", "queued", "running", workerId.trim(), { leaseMs }, now);
+      `).run(owner, leaseExpiresAt, now, candidate.id);
+      this.recordEvent(candidate.id, "claimed", "queued", "running", owner, { leaseMs }, now);
       this.db.exec("COMMIT");
       return this.get(candidate.id);
     } catch (error) {
@@ -271,6 +277,7 @@ export class JobStore {
   }
 
   complete(id: string, workerId: string, result: unknown = null): Job {
+    const owner = normalizeWorkerId(workerId);
     const now = this.clock();
     return this.transaction(() => {
       const change = this.db.prepare(`
@@ -278,17 +285,17 @@ export class JobStore {
         SET status = 'succeeded', result = ?, error = NULL, worker_id = NULL,
             lease_expires_at = NULL, updated_at = ?
         WHERE id = ? AND status = 'running' AND worker_id = ? AND lease_expires_at > ?
-      `).run(JSON.stringify(result), now, id, workerId, now);
+      `).run(JSON.stringify(result), now, id, owner, now);
       if (change.changes !== 1) {
         throw new Error("job lease is missing, expired, or owned by another worker");
       }
-      this.recordEvent(id, "completed", "running", "succeeded", workerId, {}, now);
+      this.recordEvent(id, "completed", "running", "succeeded", owner, {}, now);
       return this.get(id)!;
     });
   }
 
   renewLease(id: string, workerId: string, leaseMs = 30_000): Job {
-    if (!workerId?.trim()) throw new Error("workerId is required");
+    const owner = normalizeWorkerId(workerId);
     validateLeaseMs(leaseMs);
     const now = this.clock();
     const leaseExpiresAt = scheduledAt(now, leaseMs, "leaseMs");
@@ -297,20 +304,21 @@ export class JobStore {
         UPDATE jobs
         SET lease_expires_at = ?, updated_at = ?
         WHERE id = ? AND status = 'running' AND worker_id = ? AND lease_expires_at > ?
-      `).run(leaseExpiresAt, now, id, workerId.trim(), now);
+      `).run(leaseExpiresAt, now, id, owner, now);
       if (change.changes !== 1) throw new Error("job lease is missing, expired, or owned by another worker");
-      this.recordEvent(id, "lease_renewed", "running", "running", workerId.trim(), { leaseMs }, now);
+      this.recordEvent(id, "lease_renewed", "running", "running", owner, { leaseMs }, now);
       return this.get(id)!;
     });
   }
 
   fail(id: string, workerId: string, error: string, retryDelayMs?: number): Job {
     if (!error?.trim()) throw new Error("error is required");
+    const owner = normalizeWorkerId(workerId);
     if (retryDelayMs !== undefined) validateDelayMs(retryDelayMs, "retryDelayMs");
     const now = this.clock();
     return this.transaction(() => {
       const job = this.get(id);
-      if (!job || job.status !== "running" || job.workerId !== workerId ||
+      if (!job || job.status !== "running" || job.workerId !== owner ||
           job.leaseExpiresAt === null || job.leaseExpiresAt <= now) {
         throw new Error("job lease is missing, expired, or owned by another worker");
       }
@@ -323,12 +331,12 @@ export class JobStore {
         SET status = ?, error = ?, worker_id = NULL, lease_expires_at = NULL,
             available_at = ?, updated_at = ?
         WHERE id = ? AND status = 'running' AND worker_id = ? AND lease_expires_at > ?
-      `).run(toStatus, error.trim(), availableAt, now, id, workerId, now);
+      `).run(toStatus, error.trim(), availableAt, now, id, owner, now);
       if (change.changes !== 1) {
         throw new Error("job lease is missing, expired, or owned by another worker");
       }
       this.recordEvent(id, exhausted ? "dead_lettered" : "retry_scheduled", "running", toStatus,
-        workerId, { error: error.trim(), retryDelayMs: delayMs, attempt: job.attempts }, now);
+        owner, { error: error.trim(), retryDelayMs: delayMs, attempt: job.attempts }, now);
       return this.get(id)!;
     });
   }
