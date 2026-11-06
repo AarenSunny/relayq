@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { runMultiWorkerExperiment } from "../tools/multi-worker-experiment.ts";
+import { JobStore } from "../src/store.ts";
+import { readJobEvents, runMultiWorkerExperiment } from "../tools/multi-worker-experiment.ts";
 
 test("separate worker processes drain the queue exactly once", async () => {
   const report = await runMultiWorkerExperiment({
@@ -26,6 +27,27 @@ test("separate worker processes drain the queue exactly once", async () => {
   assert.ok(report.enqueueToCompletionMs.p50 <= report.enqueueToCompletionMs.p95);
   assert.ok(report.enqueueToCompletionMs.p95 <= report.enqueueToCompletionMs.max);
   assert.ok(Object.values(report.invariants).every(Boolean));
+});
+
+test("experiment evidence includes jobs older than the global event window", () => {
+  const store = new JobStore(":memory:");
+  try {
+    const jobIds: string[] = [];
+    for (let index = 0; index < 334; index += 1) {
+      const job = store.enqueue({ type: "evidence-window" });
+      jobIds.push(job.id);
+      store.claim("worker");
+      store.complete(job.id, "worker");
+    }
+
+    assert.equal(store.listEvents(undefined, 0, 1_000).length, 1_000);
+    const events = readJobEvents(store, jobIds);
+    assert.equal(events.length, 1_002);
+    assert.equal(events.filter((event) => event.type === "enqueued").length, 334);
+    assert.equal(events.filter((event) => event.type === "completed").length, 334);
+  } finally {
+    store.close();
+  }
 });
 
 test("multi-worker experiment rejects unbounded scenarios", async () => {

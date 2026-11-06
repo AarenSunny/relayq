@@ -72,15 +72,8 @@ function validateOptions(options: MultiWorkerOptions): void {
   positiveInteger("timeoutMs", options.timeoutMs, 120_000);
 }
 
-function readAllEvents(store: JobStore): JobEvent[] {
-  const events: JobEvent[] = [];
-  let cursor = 0;
-  while (true) {
-    const batch = store.listEvents(undefined, cursor, 1_000);
-    events.push(...batch);
-    if (batch.length < 1_000) return events;
-    cursor = batch.at(-1)!.id;
-  }
+export function readJobEvents(store: JobStore, jobIds: string[]): JobEvent[] {
+  return jobIds.flatMap((jobId) => store.listEvents(jobId, 0, 100));
 }
 
 function summarizeDurations(values: number[]): MultiWorkerReport["enqueueToCompletionMs"] {
@@ -122,8 +115,9 @@ export async function runMultiWorkerExperiment(
       Promise.all(readyWorkers),
       delay(5_000, undefined, { ref: false }).then(() => { throw new Error("worker startup timed out"); }),
     ]);
+    const jobIds: string[] = [];
     for (let index = 0; index < options.jobs; index += 1) {
-      store.enqueue({ type: "sleep", payload: options.taskMs });
+      jobIds.push(store.enqueue({ type: "sleep", payload: options.taskMs }).id);
     }
     const started = performance.now();
 
@@ -143,7 +137,7 @@ export async function runMultiWorkerExperiment(
     const finished = performance.now();
 
     const completionsByWorker: Record<string, number> = {};
-    const events = readAllEvents(store);
+    const events = readJobEvents(store, jobIds);
     const enqueuedAt = new Map<string, number>();
     const completionLatencies: number[] = [];
     for (const event of events) {

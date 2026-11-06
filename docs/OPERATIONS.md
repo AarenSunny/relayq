@@ -40,8 +40,11 @@ enqueue-to-completion p50/p95/max latency, final queue statistics, explicit
 invariants, limitations, and runtime metadata (Node version, operating system,
 architecture, and available parallelism). Latency is derived from durable
 lifecycle-event timestamps, and the report verifies that every completion has
-a matching enqueue sample. Runs use an isolated temporary database, accept at
-most 500 jobs and 32 workers, and remove their state on exit.
+a matching enqueue sample. The experiment retains submitted job IDs and reads
+each durable history directly, so runs above the global event endpoint's latest
+1,000-row window do not lose early latency samples. Runs use an isolated
+temporary database, accept at most 500 jobs and 32 workers, and remove their
+state on exit.
 
 Reference run on October 17, 2026: Node.js 24.16.0 on an Apple M4 running macOS
 27.0 completed 100 25-ms jobs with four active worker processes in 0.794
