@@ -10,10 +10,14 @@ const TERMINAL_STATUSES = new Set<JobStatus>(["succeeded", "failed", "cancelled"
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 2_147_483_647;
 const MAX_ATTEMPTS = 1_000;
+const MAX_WORKER_ID_BYTES = 512;
 
 function normalizeWorkerId(workerId: string): string {
   const normalized = workerId?.trim();
   if (!normalized) throw new Error("workerId is required");
+  if (Buffer.byteLength(normalized, "utf8") > MAX_WORKER_ID_BYTES) {
+    throw new Error(`workerId must be at most ${MAX_WORKER_ID_BYTES} UTF-8 bytes`);
+  }
   return normalized;
 }
 

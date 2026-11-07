@@ -168,6 +168,27 @@ test("worker identity normalization is consistent across lease mutations", () =>
   store.close();
 });
 
+test("worker identity size is bounded before lease state changes", () => {
+  const store = new JobStore(":memory:");
+  const job = store.enqueue({ type: "bounded-worker-identity" });
+  const oversized = "é".repeat(257);
+
+  assert.throws(
+    () => store.claim(oversized),
+    /workerId must be at most 512 UTF-8 bytes/,
+  );
+  assert.deepEqual(
+    { status: store.get(job.id)?.status, attempts: store.get(job.id)?.attempts },
+    { status: "queued", attempts: 0 },
+  );
+  assert.deepEqual(store.listEvents(job.id).map((event) => event.type), ["enqueued"]);
+
+  const maximum = "w".repeat(512);
+  assert.equal(store.claim(maximum)?.workerId, maximum);
+  assert.equal(store.complete(job.id, maximum).status, "succeeded");
+  store.close();
+});
+
 test("invalid lease durations are rejected before queue state changes", () => {
   let now = 25_000;
   const store = new JobStore(":memory:", () => now);

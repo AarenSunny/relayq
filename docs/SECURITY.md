@@ -29,7 +29,9 @@ health probes work without storing credentials in browser code. Do not expose
 payloads or results containing sensitive data under this model.
 Worker IDs are normalized operational labels used for lease ownership, not
 authenticated principals; possession of the shared bearer token permits any
-worker label.
+worker label. Labels are capped at 512 UTF-8 bytes before lease state changes,
+bounding their storage in job rows and event history without treating that
+resource limit as identity validation.
 
 An internet-facing deployment still needs TLS termination, secret rotation,
 per-client identities, authorization scopes, rate limiting, and audit logs for
