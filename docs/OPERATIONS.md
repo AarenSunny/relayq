@@ -159,9 +159,11 @@ the experiment cannot mutate the development or demo queue.
 - Workers request renewal at roughly one-third of the configured lease, including
   the minimum one-second lease. Each worker keeps at most one renewal request in
   flight per job, preventing a slow control plane from accumulating overlapping
-  heartbeats. A worker also awaits that request before acknowledging completion
-  or failure, preventing its own lease mutations from overlapping. Renewal timers
-  are best effort, and control-plane requests time out after 10 seconds by default
+  heartbeats. The store keeps the later of the current and requested deadlines,
+  so an early heartbeat with a shorter duration cannot prematurely release work.
+  A worker also awaits that request before acknowledging completion or failure,
+  preventing its own lease mutations from overlapping. Renewal timers are best
+  effort, and control-plane requests time out after 10 seconds by default
   (`REQUEST_TIMEOUT_MS`). Event-loop stalls or network delays can still expire a
   lease, so handlers remain idempotent. Invalid `POLL_MS`, `LEASE_MS`, or
   `REQUEST_TIMEOUT_MS` values fail at startup instead of silently creating a busy

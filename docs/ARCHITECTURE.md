@@ -13,6 +13,9 @@ producer --> HTTP control plane --> SQLite job store <-- worker pool
 RelayQ provides **at-least-once delivery**. Claiming a job increments its attempt
 counter and grants a time-limited lease. A worker must complete or fail the job
 while it owns that lease. Long-running handlers renew their leases periodically.
+Renewal deadlines are monotonic: an accepted heartbeat can extend the current
+lease but a shorter requested duration cannot make valid ownership expire
+earlier than its existing deadline.
 If the worker disappears, the next claim operation recovers the expired lease
 and requeues the job. A job is moved to the failed-job view when its attempt
 budget is exhausted; an operator can requeue it with a fresh attempt budget.

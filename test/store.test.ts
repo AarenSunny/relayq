@@ -126,6 +126,26 @@ test("a worker can renew its lease but another worker cannot", () => {
   store.close();
 });
 
+test("lease renewal cannot shorten an existing ownership deadline", () => {
+  let now = 30_000;
+  const store = new JobStore(":memory:", () => now);
+  const job = store.enqueue({ type: "monotonic-lease" });
+  const claimed = store.claim("worker-a", 10_000)!;
+  assert.equal(claimed.leaseExpiresAt, 40_000);
+
+  now = 31_000;
+  const renewed = store.renewLease(job.id, "worker-a", 1_000);
+  assert.equal(renewed.leaseExpiresAt, 40_000);
+
+  now = 32_001;
+  assert.equal(store.claim("worker-b", 1_000), null);
+  assert.equal(store.get(job.id)?.workerId, "worker-a");
+
+  now = 40_000;
+  assert.equal(store.claim("worker-b", 1_000)?.id, job.id);
+  store.close();
+});
+
 test("worker identity normalization is consistent across lease mutations", () => {
   const store = new JobStore(":memory:");
   const completed = store.enqueue({ type: "normalized-completion" });

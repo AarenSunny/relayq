@@ -302,7 +302,7 @@ export class JobStore {
     return this.transaction(() => {
       const change = this.db.prepare(`
         UPDATE jobs
-        SET lease_expires_at = ?, updated_at = ?
+        SET lease_expires_at = MAX(lease_expires_at, ?), updated_at = ?
         WHERE id = ? AND status = 'running' AND worker_id = ? AND lease_expires_at > ?
       `).run(leaseExpiresAt, now, id, owner, now);
       if (change.changes !== 1) throw new Error("job lease is missing, expired, or owned by another worker");
