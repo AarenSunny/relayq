@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
 import { JobStore } from "../src/store.ts";
 
@@ -65,6 +66,69 @@ test("failure retries until maxAttempts is exhausted", () => {
   assert.equal(failed.attempts, 2);
   assert.equal(store.stats().failed, 1);
   store.close();
+});
+
+test("corrupt persisted attempt budgets fail before a queued job is claimed", () => {
+  const directory = mkdtempSync(join(tmpdir(), "relayq-attempt-corruption-"));
+  const filename = join(directory, "queue.db");
+  try {
+    const writer = new JobStore(filename);
+    const job = writer.enqueue({ type: "corrupt-attempt-budget", maxAttempts: 2 });
+    writer.close();
+
+    const sabotage = new DatabaseSync(filename);
+    sabotage.prepare("UPDATE jobs SET attempts = max_attempts WHERE id = ?").run(job.id);
+    sabotage.close();
+
+    const reader = new JobStore(filename);
+    assert.throws(() => reader.get(job.id), /corrupt job attempt budget/);
+    assert.throws(() => reader.claim("worker-a"), /corrupt job attempt budget/);
+    reader.close();
+
+    const inspected = new DatabaseSync(filename);
+    const persisted = inspected.prepare(
+      "SELECT status, attempts, max_attempts AS maxAttempts FROM jobs WHERE id = ?",
+    ).get(job.id) as { status: string; attempts: number; maxAttempts: number };
+    inspected.close();
+    assert.deepEqual({ ...persisted }, { status: "queued", attempts: 2, maxAttempts: 2 });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("corrupt running attempt budgets fail before lease recovery", () => {
+  const directory = mkdtempSync(join(tmpdir(), "relayq-recovery-corruption-"));
+  const filename = join(directory, "queue.db");
+  try {
+    const writer = new JobStore(filename, () => 10_000);
+    const job = writer.enqueue({ type: "corrupt-recovery-budget", maxAttempts: 2 });
+    writer.claim("worker-that-stopped", 1_000);
+    writer.close();
+
+    const sabotage = new DatabaseSync(filename);
+    sabotage.prepare("UPDATE jobs SET attempts = 0 WHERE id = ?").run(job.id);
+    sabotage.close();
+
+    const reader = new JobStore(filename, () => 20_000);
+    assert.throws(() => reader.claim("replacement-worker"), /corrupt job attempt budget/);
+    reader.close();
+
+    const inspected = new DatabaseSync(filename);
+    const persisted = inspected.prepare(
+      "SELECT status, attempts, worker_id AS workerId FROM jobs WHERE id = ?",
+    ).get(job.id) as { status: string; attempts: number; workerId: string };
+    const events = inspected.prepare(
+      "SELECT event_type AS type FROM job_events WHERE job_id = ? ORDER BY id",
+    ).all(job.id) as Array<{ type: string }>;
+    inspected.close();
+    assert.deepEqual(
+      { ...persisted },
+      { status: "running", attempts: 0, workerId: "worker-that-stopped" },
+    );
+    assert.deepEqual(events.map((event) => event.type), ["enqueued", "claimed"]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("only the lease owner can complete a job", () => {

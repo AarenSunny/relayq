@@ -19,6 +19,10 @@ earlier than its existing deadline.
 If the worker disappears, the next claim operation recovers the expired lease
 and requeues the job. A job is moved to the failed-job view when its attempt
 budget is exhausted; an operator can requeue it with a fresh attempt budget.
+Before claim or lease recovery mutates durable state, RelayQ decodes the stored
+attempt budget and rejects impossible counters, including queued work with no
+attempt remaining. Corrupt retry state therefore cannot be silently incremented
+or accompanied by a misleading transition event.
 Completion and failure acknowledgements include the worker identity and an
 unexpired-lease condition in the same SQLite update. A late worker therefore
 cannot commit stale output during the gap between its deadline and lease

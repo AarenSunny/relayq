@@ -12,6 +12,18 @@ const MAX_LEASE_MS = 2_147_483_647;
 const MAX_ATTEMPTS = 1_000;
 const MAX_WORKER_ID_BYTES = 512;
 
+function decodeAttemptBudget(row: JobRow): { maxAttempts: number; attempts: number } {
+  const maxAttempts = Number(row.max_attempts);
+  const attempts = Number(row.attempts);
+  const status = String(row.status);
+  const invalidCount = !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 ||
+    !Number.isSafeInteger(attempts) || attempts < 0 || attempts > maxAttempts;
+  const invalidState = (status === "queued" && attempts >= maxAttempts) ||
+    (["running", "succeeded", "failed"].includes(status) && attempts === 0);
+  if (invalidCount || invalidState) throw new Error("corrupt job attempt budget");
+  return { maxAttempts, attempts };
+}
+
 function normalizeWorkerId(workerId: string): string {
   const normalized = workerId?.trim();
   if (!normalized) throw new Error("workerId is required");
@@ -253,17 +265,18 @@ export class JobStore {
         this.db.exec("COMMIT");
         return null;
       }
-      const candidate = this.db.prepare(`
-        SELECT id FROM jobs
+      const candidateRow = this.db.prepare(`
+        SELECT * FROM jobs
         WHERE status = 'queued' AND available_at <= ?
         ORDER BY priority DESC, created_at ASC
         LIMIT 1
-      `).get(now) as { id: string } | undefined;
+      `).get(now) as JobRow | undefined;
 
-      if (!candidate) {
+      if (!candidateRow) {
         this.db.exec("COMMIT");
         return null;
       }
+      const candidate = this.toJob(candidateRow);
 
       this.db.prepare(`
         UPDATE jobs
@@ -436,13 +449,14 @@ export class JobStore {
   }
 
   private recoverExpiredLeases(now: number): void {
-    const expired = this.db.prepare(`
-      SELECT id, attempts, max_attempts, worker_id FROM jobs
+    const expiredRows = this.db.prepare(`
+      SELECT * FROM jobs
       WHERE status = 'running' AND lease_expires_at <= ?
-    `).all(now) as Array<{ id: string; attempts: number; max_attempts: number; worker_id: string | null }>;
+    `).all(now) as JobRow[];
 
-    for (const job of expired) {
-      const exhausted = job.attempts >= job.max_attempts;
+    for (const row of expiredRows) {
+      const job = this.toJob(row);
+      const exhausted = job.attempts >= job.maxAttempts;
       const toStatus: JobStatus = exhausted ? "failed" : "queued";
       const error = exhausted ? "lease expired after final attempt" : "worker lease expired";
       this.db.prepare(`
@@ -451,7 +465,7 @@ export class JobStore {
             available_at = ?, updated_at = ?
         WHERE id = ? AND status = 'running' AND lease_expires_at <= ?
       `).run(toStatus, error, now, now, job.id, now);
-      this.recordEvent(job.id, "lease_expired", "running", toStatus, job.worker_id,
+      this.recordEvent(job.id, "lease_expired", "running", toStatus, job.workerId,
         { exhausted, attempt: job.attempts }, now);
     }
   }
@@ -507,17 +521,18 @@ export class JobStore {
   }
 
   private toJob(row: JobRow): Job {
+    const { maxAttempts, attempts } = decodeAttemptBudget(row);
     return {
       id: String(row.id),
       type: String(row.type),
       payload: JSON.parse(String(row.payload)),
       status: row.status as JobStatus,
       priority: Number(row.priority),
-      maxAttempts: Number(row.max_attempts),
+      maxAttempts,
       backoffBaseMs: Number(row.backoff_base_ms),
       backoffMaxMs: Number(row.backoff_max_ms),
       backoffJitter: Number(row.backoff_jitter),
-      attempts: Number(row.attempts),
+      attempts,
       availableAt: Number(row.available_at),
       leaseExpiresAt: row.lease_expires_at === null ? null : Number(row.lease_expires_at),
       workerId: row.worker_id === null ? null : String(row.worker_id),

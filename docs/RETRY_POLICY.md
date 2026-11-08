@@ -40,8 +40,14 @@ newly stored policy cannot later produce an imprecise retry delay. RelayQ
 rejects a delay when adding it to the current clock would exceed JavaScript's
 exactly representable integer range, before changing queue state. These checks
 protect SQLite scheduling timestamps from fractional or rounded values without
-imposing a shorter deployment-specific delay policy. This enqueue boundary does
-not revalidate rows written by older binaries or direct database edits.
+imposing a shorter deployment-specific delay policy.
+
+Persisted attempt counters are decoded before a job is returned, claimed, or
+recovered from an expired lease. Counters must be safe non-negative integers no
+greater than their positive stored maximum; queued work must still have an
+attempt available. Invalid durable state fails before RelayQ changes the job or
+appends an event. This read boundary does not validate arbitrary direct edits to
+every other job field or repair a damaged database.
 
 `maxAttempts` must be a whole number from 1 through 1,000. The enqueue boundary
 rejects larger budgets before writing the job, preventing one request from
