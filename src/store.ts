@@ -33,6 +33,32 @@ function normalizeWorkerId(workerId: string): string {
   return normalized;
 }
 
+function decodeLeaseState(row: JobRow): {
+  leaseExpiresAt: number | null;
+  workerId: string | null;
+} {
+  const running = String(row.status) === "running";
+  const hasLease = row.lease_expires_at !== null;
+  const hasWorker = row.worker_id !== null;
+  if (!running) {
+    if (hasLease || hasWorker) throw new Error("corrupt job lease state");
+    return { leaseExpiresAt: null, workerId: null };
+  }
+  if (!hasLease || !hasWorker) throw new Error("corrupt job lease state");
+
+  const leaseExpiresAt = Number(row.lease_expires_at);
+  const workerId = String(row.worker_id);
+  if (!Number.isSafeInteger(leaseExpiresAt)) throw new Error("corrupt job lease state");
+  let normalizedWorkerId: string;
+  try {
+    normalizedWorkerId = normalizeWorkerId(workerId);
+  } catch {
+    throw new Error("corrupt job lease state");
+  }
+  if (normalizedWorkerId !== workerId) throw new Error("corrupt job lease state");
+  return { leaseExpiresAt, workerId };
+}
+
 function validateLeaseMs(leaseMs: number): void {
   if (!Number.isSafeInteger(leaseMs) || leaseMs < MIN_LEASE_MS || leaseMs > MAX_LEASE_MS) {
     throw new Error(`leaseMs must be an integer between ${MIN_LEASE_MS} and ${MAX_LEASE_MS}`);
@@ -451,7 +477,10 @@ export class JobStore {
   private recoverExpiredLeases(now: number): void {
     const expiredRows = this.db.prepare(`
       SELECT * FROM jobs
-      WHERE status = 'running' AND lease_expires_at <= ?
+      WHERE status = 'running' AND (
+        lease_expires_at IS NULL OR worker_id IS NULL OR
+        typeof(lease_expires_at) != 'integer' OR lease_expires_at <= ?
+      )
     `).all(now) as JobRow[];
 
     for (const row of expiredRows) {
@@ -522,6 +551,7 @@ export class JobStore {
 
   private toJob(row: JobRow): Job {
     const { maxAttempts, attempts } = decodeAttemptBudget(row);
+    const { leaseExpiresAt, workerId } = decodeLeaseState(row);
     return {
       id: String(row.id),
       type: String(row.type),
@@ -534,8 +564,8 @@ export class JobStore {
       backoffJitter: Number(row.backoff_jitter),
       attempts,
       availableAt: Number(row.available_at),
-      leaseExpiresAt: row.lease_expires_at === null ? null : Number(row.lease_expires_at),
-      workerId: row.worker_id === null ? null : String(row.worker_id),
+      leaseExpiresAt,
+      workerId,
       result: row.result === null ? null : JSON.parse(String(row.result)),
       error: row.error === null ? null : String(row.error),
       createdAt: Number(row.created_at),

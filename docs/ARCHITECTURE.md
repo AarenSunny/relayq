@@ -19,6 +19,11 @@ earlier than its existing deadline.
 If the worker disappears, the next claim operation recovers the expired lease
 and requeues the job. A job is moved to the failed-job view when its attempt
 budget is exhausted; an operator can requeue it with a fresh attempt budget.
+Durable job reads require running jobs to have a safe-integer expiration and a
+canonical bounded worker identity, while every non-running state must clear
+both ownership fields. Claim-time recovery also selects malformed running rows
+with missing lease metadata, so corruption fails before another job is leased
+instead of leaving the damaged work silently stranded.
 Before claim or lease recovery mutates durable state, RelayQ decodes the stored
 attempt budget and rejects impossible counters, including queued work with no
 attempt remaining. Corrupt retry state therefore cannot be silently incremented

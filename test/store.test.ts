@@ -131,6 +131,53 @@ test("corrupt running attempt budgets fail before lease recovery", () => {
   }
 });
 
+test("corrupt running lease metadata fails before recovery", () => {
+  const directory = mkdtempSync(join(tmpdir(), "relayq-lease-state-corruption-"));
+  const filename = join(directory, "queue.db");
+  try {
+    const writer = new JobStore(filename, () => 10_000);
+    const job = writer.enqueue({ type: "corrupt-lease-state", maxAttempts: 2 });
+    writer.claim("worker-that-stopped", 1_000);
+    writer.close();
+
+    const sabotage = new DatabaseSync(filename);
+    sabotage.prepare("UPDATE jobs SET lease_expires_at = NULL WHERE id = ?").run(job.id);
+    sabotage.close();
+
+    const reader = new JobStore(filename, () => 20_000);
+    assert.throws(() => reader.get(job.id), /corrupt job lease state/);
+    assert.throws(() => reader.claim("replacement-worker"), /corrupt job lease state/);
+    reader.close();
+
+    const inspected = new DatabaseSync(filename);
+    const persisted = inspected.prepare(
+      "SELECT status, attempts, worker_id AS workerId, lease_expires_at AS leaseExpiresAt " +
+      "FROM jobs WHERE id = ?",
+    ).get(job.id) as {
+      status: string;
+      attempts: number;
+      workerId: string;
+      leaseExpiresAt: number | null;
+    };
+    const events = inspected.prepare(
+      "SELECT event_type AS type FROM job_events WHERE job_id = ? ORDER BY id",
+    ).all(job.id) as Array<{ type: string }>;
+    inspected.close();
+    assert.deepEqual(
+      { ...persisted },
+      {
+        status: "running",
+        attempts: 1,
+        workerId: "worker-that-stopped",
+        leaseExpiresAt: null,
+      },
+    );
+    assert.deepEqual(events.map((event) => event.type), ["enqueued", "claimed"]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("only the lease owner can complete a job", () => {
   const store = new JobStore(":memory:");
   const job = store.enqueue({ type: "sum" });
