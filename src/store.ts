@@ -12,6 +12,29 @@ const MAX_LEASE_MS = 2_147_483_647;
 const MAX_ATTEMPTS = 1_000;
 const MAX_WORKER_ID_BYTES = 512;
 
+function decodeRetryPolicy(row: JobRow): {
+  backoffBaseMs: number;
+  backoffMaxMs: number;
+  backoffJitter: number;
+} {
+  const backoffBaseMs = row.backoff_base_ms;
+  const backoffMaxMs = row.backoff_max_ms;
+  const backoffJitter = row.backoff_jitter;
+  const invalidBase = typeof backoffBaseMs !== "number" ||
+    !Number.isSafeInteger(backoffBaseMs) || backoffBaseMs < 0;
+  const invalidMaximum = typeof backoffMaxMs !== "number" ||
+    !Number.isSafeInteger(backoffMaxMs) ||
+    typeof backoffBaseMs !== "number" || backoffMaxMs < backoffBaseMs;
+  const invalidJitter = typeof backoffJitter !== "number" ||
+    !Number.isFinite(backoffJitter) || backoffJitter < 0 || backoffJitter > 1;
+  const unsafeJitteredMaximum = !invalidMaximum && !invalidJitter &&
+    backoffMaxMs > Number.MAX_SAFE_INTEGER / (1 + backoffJitter);
+  if (invalidBase || invalidMaximum || invalidJitter || unsafeJitteredMaximum) {
+    throw new Error("corrupt job retry policy");
+  }
+  return { backoffBaseMs, backoffMaxMs, backoffJitter };
+}
+
 function decodeAttemptBudget(row: JobRow): { maxAttempts: number; attempts: number } {
   const maxAttempts = Number(row.max_attempts);
   const attempts = Number(row.attempts);
@@ -552,6 +575,7 @@ export class JobStore {
   private toJob(row: JobRow): Job {
     const { maxAttempts, attempts } = decodeAttemptBudget(row);
     const { leaseExpiresAt, workerId } = decodeLeaseState(row);
+    const { backoffBaseMs, backoffMaxMs, backoffJitter } = decodeRetryPolicy(row);
     return {
       id: String(row.id),
       type: String(row.type),
@@ -559,9 +583,9 @@ export class JobStore {
       status: row.status as JobStatus,
       priority: Number(row.priority),
       maxAttempts,
-      backoffBaseMs: Number(row.backoff_base_ms),
-      backoffMaxMs: Number(row.backoff_max_ms),
-      backoffJitter: Number(row.backoff_jitter),
+      backoffBaseMs,
+      backoffMaxMs,
+      backoffJitter,
       attempts,
       availableAt: Number(row.available_at),
       leaseExpiresAt,

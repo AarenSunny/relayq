@@ -27,7 +27,10 @@ instead of leaving the damaged work silently stranded.
 Before claim or lease recovery mutates durable state, RelayQ decodes the stored
 attempt budget and rejects impossible counters, including queued work with no
 attempt remaining. Corrupt retry state therefore cannot be silently incremented
-or accompanied by a misleading transition event.
+or accompanied by a misleading transition event. Reads also validate the
+persisted backoff base, maximum, and jitter against the enqueue-time numeric and
+exactness boundaries, so malformed durable policy cannot be leased to a worker
+and fail only after the handler has run.
 Completion and failure acknowledgements include the worker identity and an
 unexpired-lease condition in the same SQLite update. A late worker therefore
 cannot commit stale output during the gap between its deadline and lease

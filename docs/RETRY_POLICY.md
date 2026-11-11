@@ -42,12 +42,14 @@ exactly representable integer range, before changing queue state. These checks
 protect SQLite scheduling timestamps from fractional or rounded values without
 imposing a shorter deployment-specific delay policy.
 
-Persisted attempt counters are decoded before a job is returned, claimed, or
-recovered from an expired lease. Counters must be safe non-negative integers no
-greater than their positive stored maximum; queued work must still have an
-attempt available. Invalid durable state fails before RelayQ changes the job or
-appends an event. This read boundary does not validate arbitrary direct edits to
-every other job field or repair a damaged database.
+Persisted attempt counters and retry parameters are decoded before a job is
+returned, claimed, or recovered from an expired lease. Counters must be safe
+non-negative integers no greater than their positive stored maximum; queued
+work must still have an attempt available. Stored base and maximum delays must
+retain their non-negative safe-integer ordering, and jitter must remain finite,
+bounded, and safe at the maximum delay. Invalid durable state fails before
+RelayQ changes the job or appends an event. This read boundary does not validate
+arbitrary direct edits to every other job field or repair a damaged database.
 
 `maxAttempts` must be a whole number from 1 through 1,000. The enqueue boundary
 rejects larger budgets before writing the job, preventing one request from

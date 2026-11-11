@@ -96,6 +96,45 @@ test("corrupt persisted attempt budgets fail before a queued job is claimed", ()
   }
 });
 
+test("corrupt persisted retry policies fail before a queued job is claimed", () => {
+  const directory = mkdtempSync(join(tmpdir(), "relayq-retry-policy-corruption-"));
+  const filename = join(directory, "queue.db");
+  try {
+    const writer = new JobStore(filename);
+    const job = writer.enqueue({
+      type: "corrupt-retry-policy",
+      backoffBaseMs: 1_000,
+      backoffMaxMs: 2_000,
+    });
+    writer.close();
+
+    const sabotage = new DatabaseSync(filename);
+    sabotage.prepare("UPDATE jobs SET backoff_max_ms = 500 WHERE id = ?").run(job.id);
+    sabotage.close();
+
+    const reader = new JobStore(filename);
+    assert.throws(() => reader.get(job.id), /corrupt job retry policy/);
+    assert.throws(() => reader.claim("worker-a"), /corrupt job retry policy/);
+    reader.close();
+
+    const inspected = new DatabaseSync(filename);
+    const persisted = inspected.prepare(
+      "SELECT status, attempts, worker_id AS workerId FROM jobs WHERE id = ?",
+    ).get(job.id) as { status: string; attempts: number; workerId: string | null };
+    const events = inspected.prepare(
+      "SELECT event_type AS type FROM job_events WHERE job_id = ? ORDER BY id",
+    ).all(job.id) as Array<{ type: string }>;
+    inspected.close();
+    assert.deepEqual(
+      { ...persisted },
+      { status: "queued", attempts: 0, workerId: null },
+    );
+    assert.deepEqual(events.map((event) => event.type), ["enqueued"]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("corrupt running attempt budgets fail before lease recovery", () => {
   const directory = mkdtempSync(join(tmpdir(), "relayq-recovery-corruption-"));
   const filename = join(directory, "queue.db");
