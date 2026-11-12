@@ -145,10 +145,11 @@ the experiment cannot mutate the development or demo queue.
 
 - Back up the `/data` volume rather than copying an open database file.
 - Use `/health` for liveness and `/ready` for readiness. The readiness check is
-  a lightweight read of RelayQ's control row; it returns `503` when SQLite is
-  unavailable. The image's built-in Docker health check remains a liveness
-  probe; configure `/ready` as the traffic readiness gate in an orchestrator.
-  Queue depth is available separately at `/stats`.
+  a lightweight structural read of RelayQ's control row; it returns `503` when
+  that state is malformed or SQLite is unavailable. The image's built-in
+  Docker health check remains a liveness probe; configure `/ready` as the
+  traffic readiness gate in an orchestrator. Queue depth is available
+  separately at `/stats`.
 - Pause dispatch during maintenance with `POST /admin/pause`, then restore it
   with `POST /admin/resume`; current leases can still finish while paused.
 - Workers log completion only after the API accepts the lease-owned transition.

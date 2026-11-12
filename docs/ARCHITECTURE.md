@@ -125,9 +125,10 @@ limiting, and administrative audit logging are still required before an
 internet-facing deployment. See [the security model](SECURITY.md).
 
 `/health` reports only that the HTTP process is alive. `/ready` performs a
-side-effect-free read of the persistent queue-control row and returns `503` if
-SQLite is unavailable. It does not run a full integrity check or prove that
-external worker dependencies are reachable.
+side-effect-free read of the persistent queue-control row, validates its pause
+marker, reason shape, and timestamp, and returns `503` if that state is corrupt
+or SQLite is unavailable. It does not run a full database integrity check or
+prove that external worker dependencies are reachable.
 
 ## Administrative control
 
@@ -135,4 +136,7 @@ Pause state lives in SQLite rather than process memory, so it survives restarts
 and is observed consistently by every API process. A pause blocks new claims
 but does not discard queued work or prevent current workers from acknowledging
 their leases. Expired leases are still recovered while paused, ensuring work is
-ready when an operator resumes dispatch.
+ready when an operator resumes dispatch. Readers reject a malformed persisted
+control row instead of interpreting it as resumed, so readiness fails and new
+claims remain unchanged until the row is repaired. This validation covers the
+control record only, not the complete jobs and events tables.

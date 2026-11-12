@@ -15,6 +15,46 @@ test("readiness reflects SQLite availability", () => {
   assert.equal(store.isReady(), false);
 });
 
+test("corrupt persisted queue control fails readiness and blocks claims", () => {
+  const directory = mkdtempSync(join(tmpdir(), "relayq-control-corruption-"));
+  const filename = join(directory, "queue.db");
+  try {
+    const writer = new JobStore(filename);
+    const job = writer.enqueue({ type: "blocked-by-corrupt-control" });
+    writer.close();
+
+    const corruptions = [
+      "UPDATE queue_control SET paused = 2, reason = NULL, updated_at = 1 WHERE id = 1",
+      "UPDATE queue_control SET paused = 0, reason = 'stale', updated_at = 1 WHERE id = 1",
+      "UPDATE queue_control SET paused = 1, reason = NULL, updated_at = 1.5 WHERE id = 1",
+    ];
+    for (const corruption of corruptions) {
+      const sabotage = new DatabaseSync(filename);
+      sabotage.exec(corruption);
+      sabotage.close();
+
+      const reader = new JobStore(filename);
+      assert.equal(reader.isReady(), false);
+      assert.throws(() => reader.control(), /corrupt queue control state/);
+      assert.throws(() => reader.claim("worker-a"), /corrupt queue control state/);
+      reader.close();
+    }
+
+    const inspected = new DatabaseSync(filename);
+    const persisted = inspected.prepare(
+      "SELECT status, attempts, worker_id AS workerId FROM jobs WHERE id = ?",
+    ).get(job.id) as { status: string; attempts: number; workerId: string | null };
+    const events = inspected.prepare(
+      "SELECT event_type AS type FROM job_events WHERE job_id = ? ORDER BY id",
+    ).all(job.id) as Array<{ type: string }>;
+    inspected.close();
+    assert.deepEqual({ ...persisted }, { status: "queued", attempts: 0, workerId: null });
+    assert.deepEqual(events.map((event) => event.type), ["enqueued"]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("claims by priority and completes with a result", () => {
   let now = 1_000;
   const store = new JobStore(":memory:", () => now);

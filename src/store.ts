@@ -82,6 +82,20 @@ function decodeLeaseState(row: JobRow): {
   return { leaseExpiresAt, workerId };
 }
 
+function decodeQueueControl(row: JobRow | undefined): QueueControl {
+  if (!row) throw new Error("corrupt queue control state");
+  const paused = row.paused;
+  const reason = row.reason;
+  const updatedAt = row.updated_at;
+  if (paused !== 0 && paused !== 1) throw new Error("corrupt queue control state");
+  if (reason !== null && typeof reason !== "string") throw new Error("corrupt queue control state");
+  if (paused === 0 && reason !== null) throw new Error("corrupt queue control state");
+  if (typeof updatedAt !== "number" || !Number.isSafeInteger(updatedAt)) {
+    throw new Error("corrupt queue control state");
+  }
+  return { paused: paused === 1, reason, updatedAt };
+}
+
 function validateLeaseMs(leaseMs: number): void {
   if (!Number.isSafeInteger(leaseMs) || leaseMs < MIN_LEASE_MS || leaseMs > MAX_LEASE_MS) {
     throw new Error(`leaseMs must be an integer between ${MIN_LEASE_MS} and ${MAX_LEASE_MS}`);
@@ -178,9 +192,11 @@ export class JobStore {
 
   isReady(): boolean {
     try {
-      const row = this.db.prepare("SELECT id FROM queue_control WHERE id = 1").get() as
-        { id: number } | undefined;
-      return row?.id === 1;
+      const row = this.db.prepare(
+        "SELECT paused, reason, updated_at FROM queue_control WHERE id = 1",
+      ).get() as JobRow | undefined;
+      decodeQueueControl(row);
+      return true;
     } catch {
       return false;
     }
@@ -279,9 +295,10 @@ export class JobStore {
   }
 
   control(): QueueControl {
-    const row = this.db.prepare("SELECT paused, reason, updated_at FROM queue_control WHERE id = 1").get() as
-      { paused: number; reason: string | null; updated_at: number };
-    return { paused: row.paused === 1, reason: row.reason, updatedAt: Number(row.updated_at) };
+    const row = this.db.prepare(
+      "SELECT paused, reason, updated_at FROM queue_control WHERE id = 1",
+    ).get() as JobRow | undefined;
+    return decodeQueueControl(row);
   }
 
   pause(reason?: string): QueueControl {
