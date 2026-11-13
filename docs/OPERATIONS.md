@@ -177,8 +177,10 @@ the experiment cannot mutate the development or demo queue.
 - Enqueue accepts only exactly representable integer priorities and retry budgets
   from 1 through 1,000. Invalid values are rejected before the job or its event
   is written. Retry delays must also remain exactly representable after their
-  configured positive jitter. This bounds one job's retry policy; it is not a
-  producer quota, admission-control policy, or substitute for API rate limiting.
+  configured positive jitter. Durable job reads recheck priority and scheduling
+  timestamps before a candidate is claimed. This bounds one job's retry policy;
+  it is not a producer quota, admission-control policy, or substitute for API
+  rate limiting.
 - Redrive and retention calls are bounded. Follow the
   [administration runbook](ADMINISTRATION.md) for safe maintenance sequences.
 - Live event streams honor HTTP response backpressure and stop querying SQLite

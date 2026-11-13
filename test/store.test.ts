@@ -175,6 +175,51 @@ test("corrupt persisted retry policies fail before a queued job is claimed", () 
   }
 });
 
+test("corrupt persisted scheduling metadata fails before a queued job is claimed", () => {
+  const directory = mkdtempSync(join(tmpdir(), "relayq-scheduling-corruption-"));
+  const filename = join(directory, "queue.db");
+  try {
+    const writer = new JobStore(filename, () => 10_000);
+    const job = writer.enqueue({ type: "corrupt-scheduling-metadata" });
+    writer.close();
+
+    const corruptions = [
+      "priority = 1.5",
+      "available_at = 9999.5",
+      "created_at = 9999.5",
+      "updated_at = 9999.5",
+    ];
+    for (const corruption of corruptions) {
+      const sabotage = new DatabaseSync(filename);
+      sabotage.prepare(`
+        UPDATE jobs
+        SET priority = 0, available_at = 10000, created_at = 10000, updated_at = 10000,
+            ${corruption}
+        WHERE id = ?
+      `).run(job.id);
+      sabotage.close();
+
+      const reader = new JobStore(filename, () => 10_000);
+      assert.throws(() => reader.get(job.id), /corrupt job scheduling metadata/);
+      assert.throws(() => reader.claim("worker-a"), /corrupt job scheduling metadata/);
+      reader.close();
+    }
+
+    const inspected = new DatabaseSync(filename);
+    const persisted = inspected.prepare(
+      "SELECT status, attempts, worker_id AS workerId FROM jobs WHERE id = ?",
+    ).get(job.id) as { status: string; attempts: number; workerId: string | null };
+    const events = inspected.prepare(
+      "SELECT event_type AS type FROM job_events WHERE job_id = ? ORDER BY id",
+    ).all(job.id) as Array<{ type: string }>;
+    inspected.close();
+    assert.deepEqual({ ...persisted }, { status: "queued", attempts: 0, workerId: null });
+    assert.deepEqual(events.map((event) => event.type), ["enqueued"]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("corrupt running attempt budgets fail before lease recovery", () => {
   const directory = mkdtempSync(join(tmpdir(), "relayq-recovery-corruption-"));
   const filename = join(directory, "queue.db");

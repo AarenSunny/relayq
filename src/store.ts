@@ -47,6 +47,25 @@ function decodeAttemptBudget(row: JobRow): { maxAttempts: number; attempts: numb
   return { maxAttempts, attempts };
 }
 
+function decodeSchedulingMetadata(row: JobRow): {
+  priority: number;
+  availableAt: number;
+  createdAt: number;
+  updatedAt: number;
+} {
+  const priority = row.priority;
+  const availableAt = row.available_at;
+  const createdAt = row.created_at;
+  const updatedAt = row.updated_at;
+  if (typeof priority !== "number" || !Number.isSafeInteger(priority) ||
+      typeof availableAt !== "number" || !Number.isSafeInteger(availableAt) ||
+      typeof createdAt !== "number" || !Number.isSafeInteger(createdAt) ||
+      typeof updatedAt !== "number" || !Number.isSafeInteger(updatedAt)) {
+    throw new Error("corrupt job scheduling metadata");
+  }
+  return { priority, availableAt, createdAt, updatedAt };
+}
+
 function normalizeWorkerId(workerId: string): string {
   const normalized = workerId?.trim();
   if (!normalized) throw new Error("workerId is required");
@@ -593,24 +612,25 @@ export class JobStore {
     const { maxAttempts, attempts } = decodeAttemptBudget(row);
     const { leaseExpiresAt, workerId } = decodeLeaseState(row);
     const { backoffBaseMs, backoffMaxMs, backoffJitter } = decodeRetryPolicy(row);
+    const { priority, availableAt, createdAt, updatedAt } = decodeSchedulingMetadata(row);
     return {
       id: String(row.id),
       type: String(row.type),
       payload: JSON.parse(String(row.payload)),
       status: row.status as JobStatus,
-      priority: Number(row.priority),
+      priority,
       maxAttempts,
       backoffBaseMs,
       backoffMaxMs,
       backoffJitter,
       attempts,
-      availableAt: Number(row.available_at),
+      availableAt,
       leaseExpiresAt,
       workerId,
       result: row.result === null ? null : JSON.parse(String(row.result)),
       error: row.error === null ? null : String(row.error),
-      createdAt: Number(row.created_at),
-      updatedAt: Number(row.updated_at),
+      createdAt,
+      updatedAt,
     };
   }
 

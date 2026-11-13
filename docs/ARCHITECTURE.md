@@ -31,6 +31,9 @@ or accompanied by a misleading transition event. Reads also validate the
 persisted backoff base, maximum, and jitter against the enqueue-time numeric and
 exactness boundaries, so malformed durable policy cannot be leased to a worker
 and fail only after the handler has run.
+Priority, availability, creation, and update fields must likewise remain exact
+safe integers when a job is decoded. A malformed scheduling candidate therefore
+fails before RelayQ changes its state or records a claim event.
 Completion and failure acknowledgements include the worker identity and an
 unexpired-lease condition in the same SQLite update. A late worker therefore
 cannot commit stale output during the gap between its deadline and lease
