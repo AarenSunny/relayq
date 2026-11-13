@@ -679,6 +679,43 @@ test("event cursors return only newer state transitions", () => {
   store.close();
 });
 
+test("event reads reject nonpositive durable cursors and imprecise timestamps", () => {
+  const directory = mkdtempSync(join(tmpdir(), "relayq-event-cursor-corruption-"));
+  const filename = join(directory, "queue.db");
+  try {
+    const writer = new JobStore(filename, () => 10_000);
+    const job = writer.enqueue({ type: "corrupt-event-cursor" });
+    const eventId = writer.listEvents(job.id)[0].id;
+    writer.close();
+
+    const nonpositiveId = new DatabaseSync(filename);
+    nonpositiveId.prepare(`
+      UPDATE job_events SET id = 0, created_at = 10000
+      WHERE job_id = ?
+    `).run(job.id);
+    nonpositiveId.close();
+
+    const nonpositiveIdReader = new JobStore(filename);
+    assert.throws(() => nonpositiveIdReader.listEvents(job.id), /corrupt job event cursor/);
+    nonpositiveIdReader.close();
+
+    const fractionalTimestamp = new DatabaseSync(filename);
+    fractionalTimestamp.prepare(`
+      UPDATE job_events SET id = ?, created_at = 9999.5 WHERE job_id = ?
+    `).run(eventId, job.id);
+    fractionalTimestamp.close();
+
+    const fractionalTimestampReader = new JobStore(filename);
+    assert.throws(
+      () => fractionalTimestampReader.listEvents(job.id),
+      /corrupt job event cursor/,
+    );
+    fractionalTimestampReader.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("automatic retries use exponential backoff and respect the cap", () => {
   let now = 50_000;
   const store = new JobStore(":memory:", () => now, () => 0.5);

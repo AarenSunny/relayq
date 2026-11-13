@@ -100,8 +100,10 @@ native client automatically reconnects with its last received event ID.
 Polling cursors must be non-negative safe integers, so a JavaScript client
 cannot silently round an event ID before SQLite compares it. SSE applies the
 same exactness boundary and treats a malformed or imprecise reconnect cursor as
-zero, resuming from the latest bounded event window. This protects cursor
-ordering; it does not detect events removed by a retention policy.
+zero, resuming from the latest bounded event window. Durable event reads also
+require positive safe-integer IDs and safe-integer timestamps before exposing a
+new cursor. This protects cursor ordering; it does not validate every event
+payload field or detect events removed by a retention policy.
 
 The HTTP process polls for newly committed event IDs at 500 ms intervals. This
 keeps the MVP dependency-free and works across multiple processes sharing the

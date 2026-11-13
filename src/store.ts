@@ -115,6 +115,16 @@ function decodeQueueControl(row: JobRow | undefined): QueueControl {
   return { paused: paused === 1, reason, updatedAt };
 }
 
+function decodeEventCursor(row: JobRow): { id: number; createdAt: number } {
+  const id = row.id;
+  const createdAt = row.created_at;
+  if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 1 ||
+      typeof createdAt !== "number" || !Number.isSafeInteger(createdAt)) {
+    throw new Error("corrupt job event cursor");
+  }
+  return { id, createdAt };
+}
+
 function validateLeaseMs(leaseMs: number): void {
   if (!Number.isSafeInteger(leaseMs) || leaseMs < MIN_LEASE_MS || leaseMs > MAX_LEASE_MS) {
     throw new Error(`leaseMs must be an integer between ${MIN_LEASE_MS} and ${MAX_LEASE_MS}`);
@@ -635,15 +645,16 @@ export class JobStore {
   }
 
   private toEvent(row: JobRow): JobEvent {
+    const { id, createdAt } = decodeEventCursor(row);
     return {
-      id: Number(row.id),
+      id,
       jobId: String(row.job_id),
       type: row.event_type as JobEventType,
       fromStatus: row.from_status === null ? null : row.from_status as JobStatus,
       toStatus: row.to_status as JobStatus,
       workerId: row.worker_id === null ? null : String(row.worker_id),
       detail: JSON.parse(String(row.detail)) as Record<string, unknown>,
-      createdAt: Number(row.created_at),
+      createdAt,
     };
   }
 }
