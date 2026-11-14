@@ -136,6 +136,29 @@ test("corrupt persisted attempt budgets fail before a queued job is claimed", ()
   }
 });
 
+test("corrupt persisted job statuses fail durable reads and statistics", () => {
+  const directory = mkdtempSync(join(tmpdir(), "relayq-status-corruption-"));
+  const filename = join(directory, "queue.db");
+  try {
+    const writer = new JobStore(filename);
+    const job = writer.enqueue({ type: "corrupt-status" });
+    writer.close();
+
+    const sabotage = new DatabaseSync(filename);
+    sabotage.exec("PRAGMA ignore_check_constraints = ON");
+    sabotage.prepare("UPDATE jobs SET status = 'orphaned' WHERE id = ?").run(job.id);
+    sabotage.close();
+
+    const reader = new JobStore(filename);
+    assert.throws(() => reader.get(job.id), /corrupt job status/);
+    assert.throws(() => reader.list(), /corrupt job status/);
+    assert.throws(() => reader.stats(), /corrupt job status/);
+    reader.close();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test("corrupt persisted retry policies fail before a queued job is claimed", () => {
   const directory = mkdtempSync(join(tmpdir(), "relayq-retry-policy-corruption-"));
   const filename = join(directory, "queue.db");

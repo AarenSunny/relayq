@@ -6,6 +6,7 @@ type Clock = () => number;
 type Random = () => number;
 type JobRow = Record<string, unknown>;
 
+const JOB_STATUSES = new Set<JobStatus>(["queued", "running", "succeeded", "failed", "cancelled"]);
 const TERMINAL_STATUSES = new Set<JobStatus>(["succeeded", "failed", "cancelled"]);
 const MIN_LEASE_MS = 1_000;
 const MAX_LEASE_MS = 2_147_483_647;
@@ -35,10 +36,19 @@ function decodeRetryPolicy(row: JobRow): {
   return { backoffBaseMs, backoffMaxMs, backoffJitter };
 }
 
-function decodeAttemptBudget(row: JobRow): { maxAttempts: number; attempts: number } {
+function decodeJobStatus(value: unknown): JobStatus {
+  if (typeof value !== "string" || !JOB_STATUSES.has(value as JobStatus)) {
+    throw new Error("corrupt job status");
+  }
+  return value as JobStatus;
+}
+
+function decodeAttemptBudget(
+  row: JobRow,
+  status: JobStatus,
+): { maxAttempts: number; attempts: number } {
   const maxAttempts = Number(row.max_attempts);
   const attempts = Number(row.attempts);
-  const status = String(row.status);
   const invalidCount = !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 ||
     !Number.isSafeInteger(attempts) || attempts < 0 || attempts > maxAttempts;
   const invalidState = (status === "queued" && attempts >= maxAttempts) ||
@@ -75,11 +85,11 @@ function normalizeWorkerId(workerId: string): string {
   return normalized;
 }
 
-function decodeLeaseState(row: JobRow): {
+function decodeLeaseState(row: JobRow, status: JobStatus): {
   leaseExpiresAt: number | null;
   workerId: string | null;
 } {
-  const running = String(row.status) === "running";
+  const running = status === "running";
   const hasLease = row.lease_expires_at !== null;
   const hasWorker = row.worker_id !== null;
   if (!running) {
@@ -535,9 +545,10 @@ export class JobStore {
       queued: 0, running: 0, succeeded: 0, failed: 0, cancelled: 0, total: 0,
     };
     const rows = this.db.prepare("SELECT status, COUNT(*) AS count FROM jobs GROUP BY status").all() as
-      Array<{ status: JobStatus; count: number }>;
+      Array<{ status: unknown; count: number }>;
     for (const row of rows) {
-      stats[row.status] = Number(row.count);
+      const status = decodeJobStatus(row.status);
+      stats[status] = Number(row.count);
       stats.total += Number(row.count);
     }
     return stats;
@@ -619,15 +630,16 @@ export class JobStore {
   }
 
   private toJob(row: JobRow): Job {
-    const { maxAttempts, attempts } = decodeAttemptBudget(row);
-    const { leaseExpiresAt, workerId } = decodeLeaseState(row);
+    const status = decodeJobStatus(row.status);
+    const { maxAttempts, attempts } = decodeAttemptBudget(row, status);
+    const { leaseExpiresAt, workerId } = decodeLeaseState(row, status);
     const { backoffBaseMs, backoffMaxMs, backoffJitter } = decodeRetryPolicy(row);
     const { priority, availableAt, createdAt, updatedAt } = decodeSchedulingMetadata(row);
     return {
       id: String(row.id),
       type: String(row.type),
       payload: JSON.parse(String(row.payload)),
-      status: row.status as JobStatus,
+      status,
       priority,
       maxAttempts,
       backoffBaseMs,

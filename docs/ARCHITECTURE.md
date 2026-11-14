@@ -34,6 +34,9 @@ and fail only after the handler has run.
 Priority, availability, creation, and update fields must likewise remain exact
 safe integers when a job is decoded. A malformed scheduling candidate therefore
 fails before RelayQ changes its state or records a claim event.
+Durable job status must remain one of the five declared lifecycle states; job
+reads, lists, and aggregate statistics reject an unknown state instead of
+casting it into the typed API or adding an unexpected statistics field.
 Completion and failure acknowledgements include the worker identity and an
 unexpired-lease condition in the same SQLite update. A late worker therefore
 cannot commit stale output during the gap between its deadline and lease
